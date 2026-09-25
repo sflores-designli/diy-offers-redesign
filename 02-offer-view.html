@@ -59,7 +59,7 @@ const SCEN = {
   'buyer-sent':{ viewer:'BUYER',  idx:0, now:'2026-09-23T15:02:00', counter:null }
 };
 const qs = new URLSearchParams(location.search);
-const V = { scen: SCEN[qs.get('as')] ? qs.get('as') : 'seller-r1', state:'turn', entry: qs.get('as') ? 'page' : 'email', phase:'', netOpen:false, payoffEdit:false, payoff:NET_FIXED.payoff, liens:'', cmpBase:'prev', showTable:false, dlg:null, dec:{ step:1, reason:'', comment:'', share:false }, ext:{ date:'', time:'' }, ack:false, viewerOverride:null, tab:'summary', negView:'rounds' };
+const V = { scen: SCEN[qs.get('as')] ? qs.get('as') : 'seller-r1', state:'turn', entry: qs.get('as') ? 'page' : 'email', phase:'', netOpen:false, payoffEdit:false, payoff:NET_FIXED.payoff, liens:'', cmpBase:'prev', showTable:false, dlg:null, dec:{ step:1, reason:'', comment:'', share:false }, ext:{ date:'', time:'' }, ack:false, viewerOverride:null, tab:'summary', negView:'rounds', cmpA:null, cmpB:null, cmpOnlyDiff:false };
 
 function ctx(){
   const s = SCEN[V.scen];
@@ -206,7 +206,17 @@ function negotiationTab(c){
   }).join('');
   const nextHint = !V.phase && !c.expired ? `<div class="gap"></div><div class="pp-mid"><span class="pp-n next">${c.cur.n+1}</span></div><div class="gap"></div>` : '';
   const a = c.rounds.filter(r=>r.by===c.viewer).slice(-1)[0], b = c.rounds.filter(r=>r.by!==c.viewer).slice(-1)[0];
-  const table = `<div class="cmpwrap"><table class="cmp"><thead><tr><th class="term">Term</th>${rounds.map((r,i)=>`<th class="${i===rounds.length-1?'cur':''}">${r.n===1?(r.by===c.viewer?'Your offer':'Their offer'):(r.by===c.viewer?'Your ':'Their ')+r.kind.replace('Counter offer','counter')}<span class="who">${sideName(r.by,c.viewer)} · ${fmtShort(r.sent)}</span></th>`).join('')}</tr></thead><tbody>${TERMS.map(x=>`<tr><td class="term">${x.label}</td>${rounds.map((r,i)=>{ const ref = V.cmpBase==='root'?rounds[0].t:(rounds[i-1]||r).t; const ch = i>0 && !same(ref, r.t, x.key); return `<td class="${ch?'chg':'same'}">${esc(x.f(r.t))}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const n = rounds.length;
+  if(V.cmpA === null || V.cmpA >= n) V.cmpA = Math.max(0, n-2);
+  if(V.cmpB === null || V.cmpB >= n) V.cmpB = n-1;
+  const A = rounds[V.cmpA], B = rounds[V.cmpB];
+  const label = r => `${r.n===1?(r.by===c.viewer?'Your offer':'Their offer'):(r.by===c.viewer?'Your ':'Their ')+r.kind.replace('Counter offer','counter')} · ${money(r.t.price)}`;
+  const pick = (id, sel) => `<div class="field"><label for="${id}">${id==='cmpA'?'Compare':'With'}</label><select id="${id}">${rounds.map((r,i)=>`<option value="${i}" ${i===sel?'selected':''}>Round ${r.n} · ${label(r)}</option>`).join('')}</select></div>`;
+  const rowsAll = TERMS.map(x => ({ x, ch: A !== B && !same(A.t, B.t, x.key) }));
+  const shown = V.cmpOnlyDiff ? rowsAll.filter(r => r.ch) : rowsAll;
+  const nd = rowsAll.filter(r => r.ch).length;
+  const head = r => `<th>${r.n===1?(r.by===c.viewer?'Your offer':'Their offer'):(r.by===c.viewer?'Your ':'Their ')+r.kind.replace('Counter offer','counter')}<span class="who">Round ${r.n} · ${sideName(r.by,c.viewer)} · ${fmtShort(r.sent)}</span></th>`;
+  const table = `<div class="cmp-pick">${pick('cmpA', V.cmpA)}<span class="vs">vs</span>${pick('cmpB', V.cmpB)}</div><div class="cmp-sum"><span><b style="color:var(--foreground)">${nd}</b> of ${TERMS.length} terms differ${A===B?' · pick two different rounds':''}</span><label><input type="checkbox" id="cmpOnly" ${V.cmpOnlyDiff?'checked':''}>Show only what differs</label></div><div class="cmpwrap"><table class="cmp"><thead><tr><th class="termcol">Term</th>${head(A)}${head(B)}</tr></thead><tbody>${shown.map(({x,ch})=>`<tr><td class="termcol">${x.label}</td><td class="${ch?'':'same'}">${esc(x.f(A.t))}</td><td class="${ch?'chg':'same'}">${esc(x.f(B.t))}</td></tr>`).join('')||`<tr><td class="termcol" colspan="3">Nothing differs between these two rounds.</td></tr>`}</tbody></table></div>`;
   const gapLine = rounds.length>1&&a&&b?`<p class="p-sm text-muted">${b.by===c.viewer?'You':c.them.short} ${b.t.price<a.t.price?'came down':'went up'} to ${money(b.t.price)}. The gap is now <b style="color:var(--foreground)">${money(Math.abs(a.t.price-b.t.price))}</b> (${(Math.abs(a.t.price-b.t.price)/Math.max(a.t.price,b.t.price)*100).toFixed(1)}%).</p>`:'';
   const views = `<div class="tab-toolbar"><p class="p-sm text-muted">Round ${c.cur.n} · every round, both sides, oldest first</p><div class="segmented" style="width:auto;align-self:auto">${[['rounds','Rounds'],['chart','Price chart'],['table','Every term']].map(([k,l])=>`<button type="button" class="${V.negView===k?'active':''}" data-neg="${k}" style="flex:0 0 auto">${l}</button>`).join('')}</div></div>`;
   if(V.negView==='chart') return views + gapLine + priceChart(c);
@@ -216,21 +226,23 @@ function negotiationTab(c){
 
 function priceChart(c){
   const rounds = c.rounds, L = HOME.list;
-  const marks = [0, 2, 5, 10];
-  const minP = Math.min(...rounds.map(r=>r.t.price));
-  const lo = Math.min(L*0.88, minP*0.985), hi = L*1.012;
+  const pcts = rounds.map(r => (r.t.price - L) / L * 100);
+  const minPct = Math.min(0, ...pcts), maxPct = Math.max(0, ...pcts), span = Math.max(maxPct - minPct, 0.5);
+  const step = [0.5, 1, 2, 2.5, 5, 10, 20, 25, 50].find(v => span / v <= 4) || 50;
+  const marks = []; for(let m = Math.floor(minPct / step) * step; m <= Math.ceil(maxPct / step) * step + 1e-9; m += step) marks.push(Math.round(m * 10) / 10);
+  const lo = L * (1 + Math.min(marks[0], minPct - span * 0.08) / 100), hi = L * (1 + Math.max(marks[marks.length-1], maxPct + span * 0.08) / 100);
   const W = 760, left = 150, right = 24, top = 44, rowH = 56, H = top + rounds.length*rowH + 44;
   const x = p => left + (p - lo) / (hi - lo) * (W - left - right);
   const base = top + rounds.length*rowH + 8;
   const col = by => by === 'BUYER' ? '#c77a26' : '#12805c';
-  const grid = marks.map(m => { const p = L*(1-m/100), X = x(p).toFixed(1); return `<line x1="${X}" y1="${top-10}" x2="${X}" y2="${base}" class="pc-grid ${m===0?'list':''}"/><text x="${X}" y="${top-18}" text-anchor="middle" class="pc-top">${m===0?'List price':'−'+m+'%'}</text><line x1="${X}" y1="${base}" x2="${X}" y2="${base+5}" class="pc-tick"/><text x="${X}" y="${base+20}" text-anchor="middle" class="pc-axis">${money(p)}</text>`; }).join('');
+  const grid = marks.map(m => { const p = L*(1+m/100), X = x(p).toFixed(1); return `<line x1="${X}" y1="${top-10}" x2="${X}" y2="${base}" class="pc-grid ${m===0?'list':''}"/><text x="${X}" y="${top-18}" text-anchor="middle" class="pc-top">${m===0?'List price':(m<0?'−':'+')+Math.abs(m)+'%'}</text><line x1="${X}" y1="${base}" x2="${X}" y2="${base+5}" class="pc-tick"/><text x="${X}" y="${base+20}" text-anchor="middle" class="pc-axis">${money(p)}</text>`; }).join('');
   const pts = rounds.map((r,i) => [x(r.t.price), top + i*rowH + rowH/2]);
   const rows = rounds.map((r,i) => { const y = top + i*rowH + rowH/2; return `<line x1="${left}" y1="${y}" x2="${W-right}" y2="${y}" class="pc-row"/><text x="0" y="${y-3}" class="pc-lab">${r.n===1?'Original offer':r.kind.replace('Counter offer','Counter')}</text><text x="0" y="${y+13}" class="pc-sub">${r.by==='BUYER'?'Buyers':'Sellers'} · ${fmtShort(r.sent)}</text>`; }).join('');
   const last = rounds[rounds.length-1], prev = rounds[rounds.length-2];
   const gap = prev ? (() => { const a = x(Math.min(last.t.price, prev.t.price)), b2 = x(Math.max(last.t.price, prev.t.price)), y = top + (rounds.length-1)*rowH + rowH/2; return `<rect x="${a}" y="${y-16}" width="${b2-a}" height="32" rx="6" class="pc-gap"/><text x="${(a+b2)/2}" y="${y+30}" text-anchor="middle" class="pc-gaplab">Gap ${money(Math.abs(last.t.price-prev.t.price))}</text>`; })() : '';
   const path = pts.length>1 ? `<polyline points="${pts.map(p=>p.map(v=>v.toFixed(1)).join(',')).join(' ')}" class="pc-path"/>` : '';
   const dots = rounds.map((r,i) => { const [X,Y] = pts[i]; const isCur = i === rounds.length-1; const pct = ((r.t.price-L)/L*100).toFixed(1); const tip = `${r.kind} · ${r.by==='BUYER'?'Buyers':'Sellers'} · ${money(r.t.price)} · ${pct}% vs list · ${fmtShort(r.sent)}`; const shape = r.by==='BUYER' ? `<circle cx="${X}" cy="${Y}" r="${isCur?8:6.5}" fill="${col(r.by)}" class="pc-dot"/>` : `<rect x="${X-(isCur?8:6.5)}" y="${Y-(isCur?8:6.5)}" width="${isCur?16:13}" height="${isCur?16:13}" rx="3" fill="${col(r.by)}" class="pc-dot"/>`; const labRight = X < W - 150; return `<g class="pc-hit" data-tip="${esc(tip)}"><circle cx="${X}" cy="${Y}" r="16" fill="transparent"/>${shape}</g><text x="${labRight?X+14:X-14}" y="${Y+5}" text-anchor="${labRight?'start':'end'}" class="pc-val ${isCur?'cur':''}">${money(r.t.price)}</text>`; }).join('');
-  return `<div class="pc"><div class="pc-legend"><span><i class="lg-b"></i>Buyers</span><span><i class="lg-s"></i>Sellers</span><span><i class="lg-list"></i>List price and % below it</span></div><div class="pc-wrap"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Price of every round against the list price">${grid}${rows}<line x1="${left}" y1="${base}" x2="${W-right}" y2="${base}" class="pc-base"/>${gap}${path}${dots}</svg><div class="pc-tip" id="pcTip" hidden></div></div><p class="field-hint">Each row is a round, oldest at the top. The dotted lines mark the list price and 2%, 5% and 10% below it. The full numbers are in “Every term”.</p></div>`;
+  return `<div class="pc"><div class="pc-legend"><span><i class="lg-b"></i>Buyers</span><span><i class="lg-s"></i>Sellers</span><span><i class="lg-list"></i>List price and % from it</span></div><div class="pc-wrap"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Price of every round against the list price">${grid}${rows}<line x1="${left}" y1="${base}" x2="${W-right}" y2="${base}" class="pc-base"/>${gap}${path}${dots}</svg><div class="pc-tip" id="pcTip" hidden></div></div><p class="field-hint">Each row is a round, oldest at the top. The dotted lines mark the list price and every ${step}% ${minPct<0&&maxPct>0?'below and above':minPct<0?'below':'above'} it, scaled to this negotiation's prices. The full numbers are in “Every term”.</p></div>`;
 }
 function documentsTab(c){
   const rows = c.rounds.map(r => { const st = r.n < c.cur.n ? (r.n===1?['Signed','badge-green']:['Signed, then superseded','badge-muted']) : V.phase==='bound' ? ['Executed','badge-green'] : ['accepted','ack'].includes(V.phase) ? ['Signed, accepted','badge-green'] : V.phase==='declined' ? ['Signed, not accepted','badge-danger'] : V.phase==='withdrawn' ? ['Voided','badge-muted'] : c.myTurn ? ['Waiting on your signature','badge-secondary'] : ['Waiting on them','badge-muted']; return `<div class="doc"><span class="doc-ic">${r.form.replace('RF ','')}</span><div class="doc-info"><b>${r.form} · ${r.doc}</b><span>Round ${r.n} · signed by ${r.by==='BUYER'?BUYERS.short:SELLERS.short}, ${fmtShort(r.sent)}</span></div><span class="badge ${st[1]}">${st[0]}</span></div>`; }).join('');
@@ -301,7 +313,7 @@ document.addEventListener('click', e => {
   if(t.dataset.neg){ V.negView = t.dataset.neg; render(); return; }
   if(t.dataset.tab){ V.tab = t.dataset.tab; if(t.dataset.openNet) V.netOpen = true; render(); const el = document.getElementById('tabs'); if(el && t.closest('#decision, .rc')) el.scrollIntoView({behavior:'smooth', block:'start'}); return; }
   if(t.dataset.close && t.classList.contains('modal-scrim') && e.target !== t) return;
-  if(t.dataset.scen){ V.scen = t.dataset.scen; V.tab='summary'; V.phase=''; V.viewerOverride=null; V.dlg=null; V.ack=false; V.netOpen=false; V.payoffEdit=false; history.replaceState(null,'','?as='+V.scen); render(); window.scrollTo({top:0}); return; }
+  if(t.dataset.scen){ V.scen = t.dataset.scen; V.tab='summary'; V.cmpA=null; V.cmpB=null; V.phase=''; V.viewerOverride=null; V.dlg=null; V.ack=false; V.netOpen=false; V.payoffEdit=false; history.replaceState(null,'','?as='+V.scen); render(); window.scrollTo({top:0}); return; }
   if(t.dataset.state){ V.state = t.dataset.state; V.phase=''; V.viewerOverride=null; render(); return; }
   if(t.dataset.entry){ V.entry = t.dataset.entry; render(); window.scrollTo({top:0}); return; }
   if(t.dataset.dlg){ V.dlg = t.dataset.dlg; if(V.dlg==='decline') V.dec = { step:1, reason:'', comment:'', share:false }; if(V.dlg==='time') V.ext = { date:'', time:'' }; render(); return; }
@@ -333,6 +345,9 @@ document.addEventListener('change', e => {
   else if(id==='decShare'){ V.dec.share = e.target.checked; render(); }
   else if(id==='extDate'){ V.ext.date = e.target.value; render(); }
   else if(id==='extTime'){ V.ext.time = e.target.value; render(); }
+  else if(id==='cmpA'){ V.cmpA = Number(e.target.value); render(); }
+  else if(id==='cmpB'){ V.cmpB = Number(e.target.value); render(); }
+  else if(id==='cmpOnly'){ V.cmpOnlyDiff = e.target.checked; render(); }
 });
 document.addEventListener('input', e => { if(e.target.id==='decComment') V.dec.comment = e.target.value; });
 document.addEventListener('keydown', e => { if(e.key==='Escape' && V.dlg){ V.dlg = null; render(); } });
