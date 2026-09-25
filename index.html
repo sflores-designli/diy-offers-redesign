@@ -1,0 +1,37 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offers Redesign</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/offers.css">
+<style>
+.idx{max-width:880px; margin:0 auto; padding:var(--space-3xl) var(--space-md) var(--space-5xl); display:flex; flex-direction:column; gap:var(--space-xl)}
+.idx .list{display:flex; flex-direction:column; gap:var(--space-md)}
+.idx .item{display:grid; grid-template-columns:auto 1fr auto; gap:var(--space-md); align-items:center}
+.idx .item:hover{border-color:var(--border-strong)}
+.idx .n{width:40px; height:40px; border-radius:var(--radius-lg); background:var(--secondary-faint); color:var(--secondary-foreground); display:grid; place-items:center; font-weight:700}
+.idx .sub{display:flex; gap:var(--space-xs); flex-wrap:wrap; margin-top:var(--space-xs)}
+.idx .sub a{font-size:12px; font-weight:700; color:var(--foreground-alt); border:1px solid var(--border); border-radius:var(--radius-full); padding:4px 10px}
+.idx .sub a:hover{background:var(--background-subtle)}
+</style>
+</head>
+<body>
+<div class="nav-bar"><div class="nav-slot nav-slot-start"></div><a class="brand" href="index.html" aria-label="DIY Residential home"><img src="assets/icons/logo-symbol.svg" width="25.667" height="25.667" alt="" class="brand-symbol"><span>DIY Residential</span></a><div class="nav-slot nav-slot-end"></div></div>
+<main class="idx">
+  <div class="screen-text-block" style="margin:0"><p class="eyebrow">Prototype · 25 Sep 2026</p><h1 class="screen-title">Offers and counter offers</h1><p class="screen-description">Three pages: make an offer, see the offer or counter you received, and counter it. Content from the cash-offer and counter-offer flows, design from the DIY Residential listing flow.</p></div>
+  <div class="list">
+    <div class="card item"><span class="n">1</span><div><b class="h4" style="display:block">Make an offer</b><span>Full-screen wizard, 24 steps in 5 sections, review with edit links, pay and sign.</span><div class="sub"><a href="01-make-offer.html">Start</a></div></div><a class="btn btn-outline btn-sm" href="01-make-offer.html">Open →</a></div>
+    <div class="card item"><span class="n">2</span><div><b class="h4" style="display:block">View an offer or counter</b><span>From the notification email to the page: summary, what changed, the back-and-forth, accept or decline.</span><div class="sub"><a href="02-offer-view.html">From the email</a><a href="02-offer-view.html?as=seller-r1">Seller · offer</a><a href="02-offer-view.html?as=buyer-r2">Buyer · counter #1</a><a href="02-offer-view.html?as=seller-r3">Seller · counter #2</a><a href="02-offer-view.html?as=buyer-sent">Buyer · waiting</a></div></div><a class="btn btn-outline btn-sm" href="02-offer-view.html">Open →</a></div>
+    <div class="card item"><span class="n">3</span><div><b class="h4" style="display:block">Counter</b><span>A page, not a modal: choose changes term by term, compare, sign both documents, sent.</span><div class="sub"><a href="03-counter.html?as=seller-c1">Seller · counter #1</a><a href="03-counter.html?as=buyer-c2">Buyer · counter #2</a><a href="03-counter.html?as=seller-c3">Seller · counter #3</a></div></div><a class="btn btn-outline btn-sm" href="03-counter.html">Open →</a></div>
+  </div>
+</main>
+</body>
+</html>

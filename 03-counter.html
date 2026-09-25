@@ -1,0 +1,308 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Counter Offer</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/motion.css">
+<link rel="stylesheet" href="css/offers.css">
+</head>
+<body>
+
+<div class="proto-bar"><div class="proto-bar-in">
+  <span class="lbl">PROTOTYPE</span>
+  <div class="proto-seg" id="scenSeg">
+    <button type="button" data-scen="seller-c1">Seller · counter #1</button>
+    <button type="button" data-scen="buyer-c2">Buyer · counter #2</button>
+    <button type="button" data-scen="seller-c3">Seller · counter #3</button>
+  </div>
+  <span class="sp"></span>
+  <a href="index.html">All pages</a>
+</div></div>
+
+<div class="app-shell">
+  <div class="nav-bar">
+    <div class="nav-slot nav-slot-start"><a class="nav-pill nav-back" id="navBack" href="#"><i data-lucide="arrow-left" class="icon"></i><span>Back to the offer</span></a></div>
+    <a class="brand" href="index.html" aria-label="DIY Residential home"><img src="assets/icons/logo-symbol.svg" width="25.667" height="25.667" alt="" class="brand-symbol"><span>DIY Residential</span></a>
+    <div class="nav-slot nav-slot-end"><div class="nav-user" id="navUser"></div></div>
+  </div>
+  <div id="screen-area" class="screen-area"></div>
+</div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/lucide@1.47.0/dist/umd/lucide.min.js"></script>
+<script src="negotiation.js"></script>
+<script>
+const SCEN = {
+  'seller-c1': { me:'SELLER', parent:0, now:'2026-09-24T15:18:00', view:'seller-r1', next:'buyer-r2' },
+  'buyer-c2':  { me:'BUYER',  parent:1, now:'2026-09-27T12:52:00', view:'buyer-r2', next:'seller-r3' },
+  'seller-c3': { me:'SELLER', parent:2, now:'2026-09-30T10:40:00', view:'seller-r3', next:null }
+};
+const qs = new URLSearchParams(location.search);
+let K = SCEN[qs.get('as')] ? qs.get('as') : 'seller-c1';
+let C, stage = 'compose', enterAnim = true;
+
+const FIN_OPTS = ['Cash','Conventional','FHA','VA','USDA','Jumbo','Other'];
+const EDITORS = [
+  { g:'money', key:'price', label:'Purchase price', lines:'40-41', need:['price'] },
+  { g:'money', key:'em', label:'Earnest money', lines:'162-166', need:['em'] },
+  { g:'money', key:'emDays', label:'Earnest money due within', lines:'162-166', need:['emDays'] },
+  { g:'money', key:'method', label:'Financing', lines:'46-58', need:['method'] },
+  { g:'dates', key:'closing', label:'Closing date', lines:'193-199', need:['closing'] },
+  { g:'dates', key:'possession', label:'Possession', lines:'200-204', need:['possession'], tag:true },
+  { g:'pays', key:'title', label:'Title expenses', lines:'145-147', need:['title'] },
+  { g:'pays', key:'concession', label:'Seller concession', lines:'152-157', need:['concession'] },
+  { g:'pays', key:'comp', label:"Buyer's agent compensation", lines:'506-517', need:['agent'] },
+  { g:'pays', key:'warranty', label:'Home warranty', lines:'421-426', need:['warranty'] },
+  { g:'pays', key:'sa', label:'Special assessments', lines:'221-223', need:['sa'], tag:true },
+  { g:'prot', key:'appraisal', label:'Appraisal contingency', lines:'102-106', need:['appraisal'], buyerOnly:true },
+  { g:'prot', key:'inspCont', label:'Inspection contingency', lines:'346-348', need:['inspCont'], buyerOnly:true },
+  { g:'prot', key:'finCont', label:'Financing contingency', lines:'86-89', need:['finCont'], buyerOnly:true },
+  { g:'prot', key:'inspDays', label:'Inspection period', lines:'307', need:['inspDays'] },
+  { g:'prot', key:'resDays', label:'Resolution period', lines:'325', need:['resDays'] },
+  { g:'prot', key:'inspMode', label:'Pass or fail inspection', lines:'342', need:['inspMode'] },
+  { g:'prot', key:'finalInsp', label:'Final inspection', lines:'355-358', need:['finalInsp'] },
+  { g:'more', key:'expenseMods', label:'Expense modifications', lines:'152-157', need:['expenseMods'] },
+  { g:'more', key:'closingAgency', label:"Seller's closing agency", lines:'160-161', need:['closingAgency'] },
+  { g:'more', key:'emHolder', label:'Earnest money holder', lines:'162-166', need:['emHolder'] },
+  { g:'more', key:'greenbelt', label:'Greenbelt', lines:'211-220', need:['greenbelt'] }
+];
+const GROUPS = [ ['money','Price and money','What you pay, and how'], ['dates','Dates','Closing and keys'], ['pays','Who pays what','Title, concessions, warranty, assessments'], ['prot','Inspections and contingencies','Protections and their deadlines'], ['more','More contract terms','Less common terms, each prints with the lines it replaces'] ];
+const STAGES = [['compose','Choose your changes'],['compare','Compare'],['sign','Sign & send']];
+
+function init(){
+  const s = SCEN[K], parent = ROUNDS[s.parent];
+  C = { s, parent, pt:parent.t, n:parent.n, me: s.me === 'SELLER' ? SELLERS : BUYERS, them: s.me === 'SELLER' ? BUYERS : SELLERS, on:{}, v:{}, resp:{}, newReq:[], nrType:'', nrText:'', nrAmt:'', message:'', dl:'', dlDate:'', dlTime:'', moreOpen:false };
+  parent.t.requests.forEach(q => { C.resp[q.id] = q.status === 'PENDING' ? { s:'', note:'' } : { s:q.status, note:q.note||'', locked:true }; });
+  stage = 'compose'; enterAnim = true;
+}
+const val = k => C.v[k] ?? '';
+const has = k => String(val(k)).trim() !== '';
+function termReady(e){
+  if(!has(e.need[0])) return false;
+  const v = C.v;
+  if(e.key==='method' && v.method && v.method!=='Cash') return num(v.down)>0;
+  if(e.key==='possession' && v.possession==='TOA') return has('possessionDate');
+  if(e.key==='title' && v.title==='OTHER') return has('titleText');
+  if(e.key==='concession' && v.concession && v.concession!=='NONE') return num(v.concAmt)>0;
+  if(e.key==='comp' && v.agent==='YES') return has('compBasis') && num(v.compAmt)>0;
+  if(e.key==='warranty' && v.warranty && v.warranty!=='WAIVED') return num(v.warrantyAmt)>0 && has('warrantyProv');
+  if(['price','em'].includes(e.key)) return num(v[e.key])>0;
+  if(['emDays','inspDays','resDays'].includes(e.key)) return num(v[e.key])>0;
+  return true;
+}
+function draft(){
+  const t = JSON.parse(JSON.stringify(C.pt)), v = C.v;
+  const on = k => { const e = EDITORS.find(x=>x.key===k); return !!C.on[k] && termReady(e); };
+  if(on('price')) t.price = num(v.price);
+  if(on('em')) t.em = num(v.em);
+  if(on('emDays')) t.emDays = num(v.emDays);
+  if(on('method')){ t.method = v.method === 'Cash' ? 'CASH' : 'FIN'; t.loanType = v.method === 'Cash' ? '' : v.method; t.down = v.method === 'Cash' ? null : num(v.down); }
+  if(on('closing')) t.closing = v.closing;
+  if(on('possession')){ t.possession = v.possession; t.possessionDate = v.possession === 'TOA' ? v.possessionDate : ''; }
+  if(on('title')){ t.title = v.title; t.titleText = v.title === 'OTHER' ? v.titleText : ''; }
+  if(on('concession')) t.concession = v.concession === 'NONE' ? null : { basis:v.concession, amount:num(v.concAmt), applyTo:['BUYER_CLOSING_COSTS'] };
+  if(on('comp')) t.comp = v.agent === 'YES' ? { basis:v.compBasis, amount:num(v.compAmt) } : null;
+  if(on('warranty')) t.warranty = v.warranty === 'WAIVED' ? null : { paidBy:v.warranty, amount:num(v.warrantyAmt), provider:v.warrantyProv };
+  if(on('sa')) t.sa = v.sa;
+  if(on('appraisal')) t.appraisal = v.appraisal === 'true';
+  if(on('inspCont')) t.inspCont = v.inspCont === 'true';
+  if(on('finCont')) t.finCont = v.finCont === 'true';
+  if(on('inspDays')) t.inspDays = num(v.inspDays);
+  if(on('resDays')) t.resDays = num(v.resDays);
+  if(on('inspMode')) t.inspMode = v.inspMode;
+  if(on('finalInsp')) t.finalInsp = num(v.finalInsp);
+  if(on('expenseMods')) t.expenseMods = v.expenseMods;
+  if(on('closingAgency')) t.closingAgency = v.closingAgency;
+  if(on('emHolder')) t.emHolder = v.emHolder;
+  if(on('greenbelt')) t.greenbelt = v.greenbelt === 'NONE' ? null : v.greenbelt === 'KEEP';
+  t.requests = C.pt.requests.map(q => ({ ...q, status: C.resp[q.id].s || q.status, note: C.resp[q.id].note || q.note }));
+  t.newRequests = C.newReq.slice();
+  return t;
+}
+function counterDeadline(){
+  if(C.dl === 'other'){ if(!C.dlDate || !C.dlTime) return null; const [h, m] = C.dlTime.match(/\d+/g); const pm = /PM/.test(C.dlTime); const d = new Date(C.dlDate + 'T00:00:00'); d.setHours((Number(h) % 12) + (pm ? 12 : 0), Number(m), 0, 0); return d; }
+  if(C.dl === 'std'){ const n = dateObj(C.s.now); const d = new Date(n); d.setDate(d.getDate() + 1); d.setHours(n.getHours() < 12 ? 12 : 17, 0, 0, 0); return d; }
+  return null;
+}
+const stdText = () => { const n = dateObj(C.s.now); const d = new Date(n); d.setDate(d.getDate()+1); d.setHours(n.getHours()<12?12:17,0,0,0); return d.toLocaleDateString('en-US',{month:'long',day:'numeric'})+' at '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'})+' CT'; };
+const dlText = () => { const d = counterDeadline(); return d ? d.toLocaleDateString('en-US',{month:'long',day:'numeric',year:'numeric'}) + ' at ' + d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}) + ' CT' : ''; };
+function valid(){
+  const openBad = EDITORS.some(e => C.on[e.key] && !termReady(e));
+  const reqBad = Object.values(C.resp).some(r => !r.locked && (!r.s || (r.s === 'DECLINED' && !String(r.note||'').trim())));
+  const dlOk = !!counterDeadline() && counterDeadline() > dateObj(C.s.now);
+  return !openBad && !reqBad && dlOk;
+}
+
+function their(k, t){
+  const f = { price:()=>money(t.price), em:()=>money(t.em), emDays:()=>`${t.emDays} days after the Binding Agreement`, method:()=>t.method==='CASH'?'Cash, no loan':`${t.loanType}, ${money(t.down)} down`, closing:()=>fmtDay(t.closing), possession:()=>POSS(t), title:()=>TITLE(t), concession:()=>CONC(t), comp:()=>t.comp?`${t.comp.basis==='PCT'?t.comp.amount+'%':money(t.comp.amount)}`:'Not requested', warranty:()=>WARR(t), sa:()=>t.sa==='SELLER'?'Seller pays at closing':'Buyer does not assume', appraisal:()=>t.appraisal?'Included':'Waived', inspCont:()=>t.inspCont?'Included':'Waived', finCont:()=>t.finCont?'Included':'None (cash)', inspDays:()=>`${t.inspDays} days`, resDays:()=>`${t.resDays} days`, inspMode:()=>t.inspMode==='PASSFAIL'?'Pass or fail':'Buyer may request repairs', finalInsp:()=>`${t.finalInsp} day${t.finalInsp===1?'':'s'} before closing`, expenseMods:()=>t.expenseMods||'None', closingAgency:()=>t.closingAgency, emHolder:()=>t.emHolder, greenbelt:()=>t.greenbelt===null?'No election':t.greenbelt?'Buyer keeps the status':'Seller pays rollback taxes' }[k];
+  return f ? f() : '';
+}
+const mIn = (k, label, pct) => `<div class="field">${label?`<label>${label}</label>`:''}<div class="field-icon-input"><span class="affix">${pct?'%':'$'}</span><input type="text" data-v="${k}" value="${esc(val(k))}" inputmode="decimal" placeholder="0"></div></div>`;
+const tIn = (k, label, type, ph) => `<div class="field">${label?`<label>${label}</label>`:''}<input type="${type||'text'}" data-v="${k}" value="${esc(val(k))}" placeholder="${esc(ph||'')}"></div>`;
+const dIn = (k, label, suf) => `<div class="field">${label?`<label>${label}</label>`:''}<div class="field-icon-input"><input type="text" data-v="${k}" value="${esc(val(k))}" inputmode="numeric" placeholder="0"><span class="affix">${suf||'days'}</span></div></div>`;
+const sel = (k, label, opts) => `<div class="field">${label?`<label>${label}</label>`:''}<select data-v="${k}"><option value="" disabled ${has(k)?'':'selected'}>Choose</option>${opts.map(([v,l])=>`<option value="${v}" ${String(val(k))===String(v)?'selected':''}>${l}</option>`).join('')}</select></div>`;
+function editor(k){
+  const v = C.v;
+  switch(k){
+    case 'price': return `<div class="row2">${mIn('price','New purchase price')}</div>${num(v.price)?`<span class="now-line">${num(v.price)>C.pt.price?'+':'−'}${money(Math.abs(num(v.price)-C.pt.price))} vs their ${C.n===1?'offer':'counter'} · ${((num(v.price)-HOME.list)/HOME.list*100).toFixed(1)}% vs list</span>`:''}`;
+    case 'em': return `<div class="row2">${mIn('em','New earnest money')}</div>${num(v.em)?`<span class="now-line">${(num(v.em)/num(C.on.price&&num(v.price)?v.price:C.pt.price)*100).toFixed(1)}% of the price</span>`:''}`;
+    case 'emDays': return `<div class="row2">${dIn('emDays','Due within')}</div>`;
+    case 'method': return `<div class="row2">${sel('method','Purchase method', FIN_OPTS.map(o=>[o,o]))}${v.method&&v.method!=='Cash'?mIn('down','Down payment'):''}</div>`;
+    case 'closing': return `<div class="row2">${tIn('closing','New closing date','date')}</div>`;
+    case 'possession': return `<div class="row2">${sel('possession','Possession',[['CLOSING','At closing'],['TOA','Temporary occupancy agreement']])}${v.possession==='TOA'?tIn('possessionDate','Possession date','date'):''}</div>`;
+    case 'title': return `<div class="row2">${sel('title','Who pays',[['BUYER','Buyer pays'],['SELLER','Seller pays'],['SPLIT','Split evenly'],['OTHER','Other arrangement']])}</div>${v.title==='OTHER'?tIn('titleText','Describe the arrangement'):''}`;
+    case 'concession': return `<div class="row2">${sel('concession','Concession',[['NONE','No concession'],['DOLLARS','A dollar amount'],['PCT','A percentage of the price']])}${v.concession==='DOLLARS'?mIn('concAmt','Amount'):v.concession==='PCT'?mIn('concAmt','Percentage',true):''}</div>`;
+    case 'comp': return `<div class="row2">${sel('agent','Is an agent helping you?',[['NO','No agent is helping me'],['YES','An agent is helping me']])}${v.agent==='YES'?sel('compBasis','Paid as',[['PCT','Percent of price'],['DOLLARS','Dollar amount']]):''}${v.agent==='YES'&&v.compBasis?mIn('compAmt','Compensation',v.compBasis==='PCT'):''}</div>`;
+    case 'warranty': return `<div class="row2">${sel('warranty','Home warranty',[['WAIVED','No home warranty'],['BUYER','Buyer pays'],['SELLER','Seller pays']])}${v.warranty&&v.warranty!=='WAIVED'?mIn('warrantyAmt','Plan cost'):''}</div>${v.warranty&&v.warranty!=='WAIVED'?tIn('warrantyProv','Plan provider'):''}`;
+    case 'sa': return `<div class="row2">${sel('sa','Special assessment',[['SELLER','Seller pays it at closing'],['BUYER_REFUSES','Buyer does not assume it']])}</div>`;
+    case 'appraisal': return `<div class="row2">${sel('appraisal','Appraisal',[['true','Keep the appraisal contingency'],['false','Waive it']])}</div>`;
+    case 'inspCont': return `<div class="row2">${sel('inspCont','Inspection rights',[['true','Keep my inspection rights'],['false','Waive all inspections']])}</div>`;
+    case 'finCont': return `<div class="row2">${sel('finCont','Financing contingency',[['true','Make it depend on the loan'],['false','No financing contingency']])}</div>`;
+    case 'inspDays': return `<div class="row2">${dIn('inspDays','Inspection period')}</div>`;
+    case 'resDays': return `<div class="row2">${dIn('resDays','Resolution period')}</div>`;
+    case 'inspMode': return `<div class="row2">${sel('inspMode','Repair requests',[['RIGHT','Buyer may request repairs'],['PASSFAIL','Pass or fail: inspection must pass or the sale does not proceed']])}</div>`;
+    case 'finalInsp': return `<div class="row2">${dIn('finalInsp','Final inspection','days before')}</div>`;
+    case 'expenseMods': return tIn('expenseMods','Expense modifications','text','Up to 300 characters');
+    case 'closingAgency': return tIn('closingAgency',"Seller's closing agency");
+    case 'emHolder': return tIn('emHolder','Earnest money holder');
+    case 'greenbelt': return sel('greenbelt','Greenbelt',[['NONE','No election'],['KEEP','Buyer keeps the Greenbelt status'],['ROLLBACK','Seller pays rollback taxes at closing']]);
+  }
+  return '';
+}
+function termRow(e){
+  const seller = C.s.me === 'SELLER';
+  const ln = `<span class="ln">RF 401 · l.${e.lines}</span>`;
+  if(e.key === 'comp' && seller && !C.pt.comp) return `<div class="term"><button class="switch" disabled aria-label="Not available"></button><div><div class="nm">${e.label}</div><div class="their">The buyers didn't ask for it. Only a round that carries it can be changed or removed.</div></div>${ln}</div>`;
+  if(e.buyerOnly && seller) return `<div class="term"><button class="switch" disabled aria-label="Buyer's term"></button><div><div class="nm">${e.label}</div><div class="their">Their term: <b>${their(e.key, C.pt)}</b> · the buyers' term, only they can change it</div></div>${ln}</div>`;
+  const on = !!C.on[e.key];
+  return `<div class="term ${on?'on':''}"><button type="button" class="switch" data-tg="${e.key}" aria-pressed="${on}" aria-label="Change ${e.label}"></button><div><div class="nm">${e.label}${e.tag?' <span class="badge badge-soft" style="padding:2px 6px;font-size:10px;margin-left:4px">NEW TERM</span>':''}</div><div class="their">${on?'Their term':'Their term'}: <b>${their(e.key, C.pt)}</b>${on?'':' · carries forward'}</div></div>${ln}${on?`<div class="ed">${editor(e.key)}${!termReady(e)?'<span class="field-hint">Complete the new value, or switch it off to keep their term.</span>':''}</div>`:''}</div>`;
+}
+
+function render(){
+  const area = $('#screen-area');
+  if(!enterAnim){ clearTimeout(render.t); area.classList.remove('screen-enter'); }
+  const t = draft();
+  const d = diff(C.pt, t), rq = requestDiff(C.pt, t);
+  const changes = d.length + rq.length + C.newReq.length;
+  const ex = exceptions(ROUNDS[0].t, t);
+  $$('#scenSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.scen === K));
+  $('#navBack').href = `02-offer-view.html?as=${C.s.view}`;
+  $('#navBack span').textContent = `Back to the ${C.parent.n===1?'offer':'counter'}`;
+  $('#navUser').innerHTML = `<span>${C.me.people[0].n}</span><span class="avatar ${C.s.me==='BUYER'?'gold':''}">${C.me.people[0].i}</span>`;
+  const si = STAGES.findIndex(x=>x[0]===stage);
+  const titleMap = { compose:`Your counter offer #${C.n}`, compare:`${C.parent.n===1?'Their offer':'Their counter'} vs your counter #${C.n}`, sign:`Sign counter offer #${C.n}` };
+  const descMap = { compose:`Change only what you want to change. Every term you leave alone carries forward from their ${C.parent.n===1?'offer':'counter'} exactly as ${C.them.short} wrote it.`, compare:`Changed terms are highlighted. Read it the way ${C.them.short} will.`, sign:'Your answer is recorded on the document you received, then the counter form sets out what you are changing. Sign both, in either order.' };
+  const over = ex.length > 11;
+  let inner, foot = '';
+  if(stage === 'sent' || stage === 'waiting'){
+    inner = `<div class="screen-fullbleed"><div class="fullbleed-inner milestone">${done(t)}</div></div>`;
+  } else {
+    const main = stage === 'compose' ? compose(t) : stage === 'compare' ? compare(t) : sign(t, ex);
+    if(stage === 'compose') foot = `<div class="footer-bar"><div class="footer-bar-inner"><span class="p-sm text-muted"><b style="color:var(--foreground)">${changes} ${changes===1?'change':'changes'}</b> · counter #${C.n} at <b style="color:var(--foreground)">${money(t.price)}</b></span><div class="footer-bar-actions"><a class="btn btn-outline" href="02-offer-view.html?as=${C.s.view}">Cancel</a><button type="button" class="btn btn-primary" data-stage="compare" ${changes&&!over&&valid()?'':'disabled'}>Compare, then sign</button></div></div></div>`;
+    if(stage === 'compare') foot = `<div class="footer-bar"><div class="footer-bar-inner"><button type="button" class="btn btn-outline" data-stage="compose">Edit my changes</button><div class="footer-bar-actions"><span class="p-sm text-muted">Nothing is sent until every ${C.s.me==='SELLER'?'owner':'buyer'} has signed.</span><button type="button" class="btn btn-primary" data-stage="sign">Review &amp; sign</button></div></div></div>`;
+    if(stage === 'sign') foot = `<div class="footer-bar"><div class="footer-bar-inner"><button type="button" class="btn btn-outline" data-stage="compare">Back</button><div class="footer-bar-actions"><button type="button" class="btn btn-primary" data-act="sign">Sign both &amp; send</button></div></div></div>`;
+    inner = `<div class="main-split-container"><div class="split-zones"><div class="zone-content"><div class="screen-text-block"><div class="screen-crumbs"><a href="#">${C.s.me==='SELLER'?'Offers received':'Offers made'}</a>${icon('chevron-right',12)}<a href="${HOME.listingUrl}">${HOME.address}</a>${icon('chevron-right',12)}<a href="02-offer-view.html?as=${C.s.view}">${C.parent.n===1?'Offer from '+BUYERS.names:C.parent.kind+' from '+C.them.names}</a>${icon('chevron-right',12)}<span class="cur">Counter offer #${C.n}</span></div><p class="eyebrow">Step ${si+1} of 3 - ${STAGES[si][1]}</p><h1 class="screen-title">${titleMap[stage]}</h1><p class="screen-description">${descMap[stage]}</p><div class="act-segments" style="max-width:320px;margin-top:4px">${STAGES.map((_,i)=>`<div class="act-segment ${i<=si?'filled':''}"></div>`).join('')}</div></div>${main}</div><aside class="zone-rail">${rail(t, changes, ex)}</aside></div></div>`;
+  }
+  area.innerHTML = `<div class="screen-working">${inner}${foot}</div>`;
+  if(enterAnim){ area.classList.add('screen-enter'); clearTimeout(render.t); render.t = setTimeout(()=>area.classList.remove('screen-enter'), 700); enterAnim = false; }
+  refreshIcons();
+}
+
+function compose(t){
+  const seller = C.s.me === 'SELLER';
+  const groups = GROUPS.map(([g, title, sub]) => {
+    const eds = EDITORS.filter(e => e.g === g);
+    const cnt = eds.filter(e => C.on[e.key]).length;
+    if(g === 'more' && !C.moreOpen && !cnt) return `<div class="card flush"><div class="card-head" style="padding-bottom:var(--space-xl)"><div><p class="h4">${title}</p><p class="p-sm">${sub}</p></div><button type="button" class="btn btn-outline btn-sm" data-act="more">Show ${eds.length} more terms</button></div></div>`;
+    return `<div class="card flush"><div class="card-head"><div><p class="h4">${title}</p><p class="p-sm">${sub}</p></div>${cnt?`<span class="badge badge-green">${cnt} changed</span>`:''}</div><div class="card-body">${eds.map(termRow).join('')}</div></div>`;
+  }).join('');
+  const typ = x => ({INCLUSIONS:'Inclusion',EXCLUSIONS:'Exclusion',REPAIRS:'Repair',CREDITS:'Credit'})[x];
+  const reqs = C.pt.requests.map(q => { const r = C.resp[q.id];
+    if(r.locked) return `<div class="term"><span></span><div><div class="nm">${esc(q.text)}</div><div class="their">${typ(q.type)} · ${r.s==='ACCEPTED'?'agreed in an earlier round':'declined in an earlier round'}${r.note?` · “${esc(r.note)}”`:''}</div></div><span class="badge ${r.s==='ACCEPTED'?'badge-green':'badge-danger'}">${r.s==='ACCEPTED'?'Agreed':'Declined'}</span></div>`;
+    return `<div class="term"><span></span><div><div class="nm">${esc(q.text)}</div><div class="their">${typ(q.type)} · requested by the buyers</div></div><div class="segmented" style="width:auto;align-self:auto"><button type="button" class="${r.s==='ACCEPTED'?'active':''}" data-rq="${q.id}" data-s="ACCEPTED" style="flex:0 0 auto">Accept</button><button type="button" class="${r.s==='DECLINED'?'active':''}" data-rq="${q.id}" data-s="DECLINED" style="flex:0 0 auto">Decline</button></div>${r.s==='DECLINED'?`<div class="ed"><div class="field"><label>Why are you declining?</label><input type="text" data-note="${q.id}" value="${esc(r.note||'')}"></div>${!String(r.note||'').trim()?'<span class="field-hint" style="color:var(--danger)">A note is required when you decline a request.</span>':''}</div>`:''}</div>`; }).join('');
+  const newReqs = C.newReq.map((q,i) => `<div class="term"><span></span><div><div class="nm">${esc(q.text)}</div><div class="their">${typ(q.type)}${q.amount?' · '+money(q.amount):''} · your new request</div></div><button type="button" class="btn btn-ghost btn-sm" data-rmreq="${i}">Remove</button></div>`).join('');
+  const pendingCount = Object.values(C.resp).filter(r=>!r.locked).length;
+  return groups + `<div class="card flush"><div class="card-head"><div><p class="h4">Requests and stipulations</p><p class="p-sm">Each request is answered on its own, independent of price${pendingCount?'. Answer every open request.':''}</p></div></div><div class="card-body">${reqs}${newReqs}</div><div class="card-body" style="border-top:1px solid var(--border-muted)"><div class="stack-md"><span class="section-label" style="margin:0">ADD A REQUEST</span><div class="field-grid dense" style="grid-template-columns:160px 1fr ${C.nrType==='CREDITS'?'140px':''}"><div class="field"><label>Type</label><select data-nr="type"><option value="" disabled ${C.nrType?'':'selected'}>Choose</option>${[['INCLUSIONS','Inclusion'],['EXCLUSIONS','Exclusion'],['REPAIRS','Repair'],['CREDITS','Credit']].map(([v,l])=>`<option value="${v}" ${C.nrType===v?'selected':''}>${l}</option>`).join('')}</select></div><div class="field"><label>Describe your request</label><input type="text" data-nr="text" value="${esc(C.nrText)}"></div>${C.nrType==='CREDITS'?`<div class="field"><label>Amount</label><div class="field-icon-input"><span class="affix">$</span><input type="text" data-nr="amt" value="${esc(C.nrAmt)}" placeholder="0"></div></div>`:''}</div><div class="row-actions"><button type="button" class="btn btn-outline btn-sm" data-act="addReq">${icon('plus',16)}Add request</button><span class="field-hint">New requests print in the counter's Special Stipulations. A credit needs its dollar amount.</span></div></div></div></div>
+  <div class="card flush"><div class="card-head"><div><p class="h4">Response deadline</p><p class="p-sm">Printed on your counter. After it, the counter expires on its own.</p></div></div><div class="card-body stack-md"><div class="rich-list"><button type="button" class="rich-row ${C.dl==='std'?'selected':''}" data-dl="std">${icon('clock')}<span class="rich-row-text"><span class="rich-row-title">Standard deadline</span><span class="rich-row-subtitle">${stdText()}</span></span></button><button type="button" class="rich-row ${C.dl==='other'?'selected':''}" data-dl="other">${icon('calendar-clock')}<span class="rich-row-text"><span class="rich-row-title">Other date and time</span><span class="rich-row-subtitle">On the hour, at least one hour from now</span></span></button></div>${C.dl==='other'?`<div class="field-grid dense"><div class="field"><label>Date (Central time)</label><input type="date" data-c="dlDate" value="${C.dlDate}"></div><div class="field"><label>Hour (Central time)</label><select data-c="dlTime"><option value="" disabled ${C.dlTime?'':'selected'}>Choose</option>${['9:00 AM','10:00 AM','11:00 AM','12:00 PM','1:00 PM','2:00 PM','3:00 PM','4:00 PM','5:00 PM','6:00 PM','7:00 PM','8:00 PM'].map(o=>`<option ${C.dlTime===o?'selected':''}>${o}</option>`).join('')}</select></div></div>`:''}${counterDeadline()?`<div class="field-reaction good-to-know">${icon('clock')}<div><b>${C.them.short} will have until ${dlText()}</b> to accept, counter or decline.</div></div>`:''}</div></div>
+  <div class="card flush"><div class="card-head"><div><p class="h4">Message to ${seller?'the buyers':'the sellers'}</p><p class="p-sm">Optional. Shown with your counter, not printed on the form.</p></div></div><div class="card-body"><div class="field"><textarea data-c="message" maxlength="2000">${esc(C.message)}</textarea></div></div></div>`;
+}
+
+function compare(t){
+  const st = s => ({PENDING:'Requested',ACCEPTED:'Agreed',DECLINED:'Declined'})[s];
+  const rows = [...TERMS.map(x => ({ label:x.label, a:x.f(C.pt), b:x.f(t), ch:!same(C.pt, t, x.key) })), ...t.requests.map(q => { const p = C.pt.requests.find(x=>x.id===q.id); return { label:`Request · ${q.text}`, a:st(p.status), b:st(q.status), ch:p.status!==q.status }; }), ...C.newReq.map(q => ({ label:`New request · ${q.text}`, a:'Not requested', b:'Requested', ch:true }))];
+  const n = rows.filter(r=>r.ch).length;
+  return `<div class="card flush"><div class="card-head"><div><p class="h4">Side by side</p><p class="p-sm">${n} of ${rows.length} terms change</p></div></div><div class="card-body stack-md"><div class="cmpwrap"><table class="cmp"><thead><tr><th class="term">Term</th><th>${C.parent.n===1?'Their offer':'Their counter'}<span class="who">${C.them.short} · ${fmtShort(C.parent.sent)}</span></th><th class="cur">Your counter #${C.n}<span class="who">You, drafting · today</span></th></tr></thead><tbody>${rows.map(r=>`<tr><td class="term">${esc(r.label)}</td><td class="${r.ch?'':'same'}">${esc(r.a)}</td><td class="${r.ch?'chg':'same'}">${esc(r.b)}</td></tr>`).join('')}</tbody></table></div><div class="info-callout"><div class="info-callout-title">${icon('info')}${n} of ${rows.length} terms change.</div><div class="info-callout-text">Everything not listed as changed stands exactly as they wrote it.</div></div></div></div>`;
+}
+
+function sign(t, ex){
+  const seller = C.s.me === 'SELLER', got = C.parent;
+  const signers = C.me.people.map((p,i)=>`<div class="signer"><div><b>${p.n}</b><span>${p.r}</span></div><span class="badge ${i?'badge-muted':'badge-secondary'}">${i?'Then '+p.n.split(' ')[0]+', from email':'You sign first'}</span></div>`).join('');
+  const elect = (label, sub, sel) => `<div class="rich-row ${sel?'selected':''} locked"><input type="checkbox" ${sel?'checked':''} tabindex="-1" disabled><span class="rich-row-text"><span class="rich-row-title">${label}</span><span class="rich-row-subtitle">${sub}</span></span></div>`;
+  const rf401done = got.n > 1 ? `<div class="doc-step done"><span class="doc-num">${icon('check')}</span><div class="doc-body"><span class="h4">RF 401 · Purchase and Sale Agreement</span><span class="p-sm text-muted">${seller?'Signed with your COUNTERS answer in round 1.':`Signed by ${BUYERS.short} on 23 September, when the offer was submitted.`} Nothing more is needed on this form.</span></div></div>` : '';
+  const step1 = `<div class="doc-step"><span class="doc-num">1</span><div class="doc-body"><span class="h4">${got.form} · ${got.n===1?'Purchase and Sale Agreement':got.doc}</span><span class="p-sm text-muted">${got.n===1?'Their offer':'Their counter'}, with your response recorded on ${got.n===1?'the agreement itself':'it'}.</span><span class="section-label" style="margin:0">YOUR ELECTION</span><div class="rich-list">${elect('ACCEPTS',`Take their ${got.n===1?'offer':'counter'} exactly as written.`)}${elect('COUNTERS',`Replace their ${got.n===1?'offer':'counter'} with your terms and send it back. Theirs ends here.`,true)}${elect('REJECTS','End the negotiation.')}</div><p class="field-hint">Marked for you because you're countering. To accept or decline instead, <a class="btn-link" style="font-size:12px" href="02-offer-view.html?as=${C.s.view}">go back to the ${got.n===1?'offer':'counter'}</a>.</p>${got.n===1&&seller?`<div class="info-callout"><div class="info-callout-title">${icon('info')}You sign the purchase agreement once.</div><div class="info-callout-text">However many rounds this takes, you will not be asked to sign this form again; later rounds are papered on the counter form only.</div></div>`:''}<span class="section-label" style="margin:0">SIGNATURES</span><div>${signers}</div></div></div>`;
+  const step2 = `<div class="doc-step"><span class="doc-num">2</span><div class="doc-body"><span class="h4">RF 651 · Counter Offer #${C.n}</span><span class="p-sm text-muted">The changes you are asking for, each with the agreement lines it replaces. Everything else stands as they wrote it.</span><ul class="doc-list">${ex.map(x=>`<li><span class="ln">Lines ${x.lines}:</span>${esc(x.text)}</li>`).join('')}</ul><p class="field-hint">Responds by ${dlText()}.</p><span class="section-label" style="margin:0">SIGNATURES</span><div>${signers}</div></div></div>`;
+  return `${rf401done}${step1}${step2}<div class="info-callout"><div class="info-callout-title">${icon('info')}Nothing is sent before every signature.</div><div class="info-callout-text">Once both are signed by ${C.me.people.map(p=>p.n.split(' ')[0]).join(' and ')}, the counter goes to ${C.them.short}. They see nothing before that.</div></div>`;
+}
+
+function achievement(title, desc){ return `<div class="achievement"><div class="achievement-icon" aria-hidden="true"><img class="achievement-ring-outer" src="assets/icons/achievement-ring-outer.svg" width="48" height="48" alt=""><img class="achievement-ring-inner" src="assets/icons/achievement-ring-inner.svg" width="42" height="42" alt=""><span class="achievement-check"><img src="assets/icons/checkmark-circle-01.svg" width="20" height="20" alt=""></span></div><div class="achievement-text"><p class="achievement-title">${title}</p><p class="achievement-description">${desc}</p></div></div>`; }
+function done(t){
+  const co = C.me.people[1].n;
+  if(stage === 'waiting') return `<div class="achievement"><div class="achievement-text"><p class="achievement-title">Waiting for ${co} to sign</p><p class="achievement-description">You signed both documents. DocuSign emailed ${co.split(' ')[0]}. ${C.them.short} receive counter #${C.n} only when ${co.split(' ')[0]} has signed too.</p></div></div><div class="card" style="width:100%;max-width:520px;text-align:left"><div class="tl"><div class="tl-i done"><b>You signed COUNTERS and counter #${C.n}</b><span>Just now</span></div><div class="tl-i now"><b>${co} signs both</b><span>From DocuSign's email</span></div><div class="tl-i"><b>${C.them.short} are notified</b><span>They have until ${dlText()}</span></div></div></div><button type="button" class="proto-chip" data-act="cosigned" style="align-self:center">Prototype: ${co.split(' ')[0]} signs</button><p class="field-hint">Changed your mind? You can withdraw an unsent counter from the offer page; their ${C.parent.n===1?'offer':'counter'} is then open again.</p>`;
+  const seller = C.s.me === 'SELLER';
+  return `${achievement(`Counter #${C.n} sent`, `${C.them.names} have been notified. The counter expires ${dlText()}.`)}<div class="mail" style="width:100%;max-width:560px;text-align:left"><div class="mail-h"><span>To ${C.them.names}</span><span>Email &amp; text</span></div><div class="mail-b"><p class="h4">🔄 You've Received a Counteroffer!</p><p>The ${seller?'seller has responded to your offer':'buyer has responded to your counteroffer'} on <b>${HOME.address}</b> with a counteroffer.</p><div class="kv"><span>Counteroffer price</span><b>${money(t.price)}</b></div><div class="kv"><span>Expires</span><b>${dlText().replace(' CT','')}</b></div><p>Please review the counteroffer carefully, including all changes to the price, terms, and conditions.</p></div></div><div class="row-actions" style="justify-content:center"><a class="btn btn-outline" href="02-offer-view.html?as=${C.s.view}">Back to the offer</a>${C.s.next?`<a class="btn btn-primary" href="02-offer-view.html?as=${C.s.next}">See what ${C.them.short} receive</a>`:''}</div>`;
+}
+
+function rail(t, changes, ex){
+  const over = ex.length > 11;
+  const rounds = ROUNDS.slice(0, C.s.parent + 1);
+  const dt = diff(C.pt, t);
+  const stat = (src, w, h, v, l, flip) => `<span class="listing-card-stat"><span class="listing-card-stat-icon${flip?' flipped':''}"><img src="assets/icons/${src}" width="${w}" height="${h}" alt=""></span>${v} ${l}</span>`;
+  return `<div class="listing-card"><div class="listing-card-image cover"><span class="badge badge-primary">YOUR COUNTER #${C.n}</span></div><div class="listing-card-content"><div class="listing-card-heading"><p class="listing-card-title">${money(t.price)}</p><p class="listing-card-address">${HOME.address}, ${HOME.city}</p><p class="listing-card-list">List price ${money(HOME.list)}</p></div><div class="listing-card-stats">${stat('bed-double.svg',14.8333,13.5,HOME.beds,'beds',true)}${stat('bathtub.svg',14.8333,13.5,HOME.baths,'baths',true)}${stat('pencil-ruler.svg',16,16,HOME.sqft,'sqft')}</div><div class="living-card-rows"><div class="living-card-row"><span class="row-label">Changes</span><span class="row-action ${changes?'done':'pending'}">${changes||'None yet'}</span></div><div class="living-card-row"><span class="row-label">Closing</span><span class="row-action done">${fmtShort(t.closing)}</span></div><div class="living-card-row"><span class="row-label">They respond by</span><span class="row-action ${counterDeadline()?'done':'pending'}">${counterDeadline()?dlText().replace(/, \d{4}/,'').replace(' CT',''):'Not set'}</span></div></div></div></div>
+  <div class="rail-card"><span class="section-label">HOW IT PRINTS ON THE RF 651</span><ul class="exl">${ex.map(x=>`<li class="${dt.some(d=>d.lines===x.lines)||x.text.startsWith('Added')||x.text.startsWith('Credit')||x.text.startsWith('Repairs added')?'new':''}"><span class="lnn">Lines ${x.lines}</span><span>${esc(x.text)}</span></li>`).join('')||'<li><span></span><span class="text-muted">No changes yet.</span></li>'}</ul><div class="budget">${Array.from({length:11},(_,i)=>`<i class="${i<ex.length?(over?'x':'u'):''}"></i>`).join('')}</div><p class="p-mini text-muted">${over?`<b style="color:var(--danger)">${ex.length} of 11 lines.</b> The counter form holds 11 exception lines; shorten or drop a change.`:`${ex.length} of 11 exception lines. Each counter restates every change still in force against the original agreement.`}</p></div>
+  <div class="rail-card"><span class="section-label">WHERE THIS STANDS</span><div class="tally">${rounds.map((r,i)=>`<div class="tbox"><div class="th"><span>${r.by===C.s.me?'Your':'Their'} ${r.n===1?'offer':r.kind.replace('Counter offer','counter')}</span><b>${money(r.t.price)}</b></div><div class="dt">${r.who} · ${fmtShort(r.sent)}</div><ul>${(i===0?['Opening terms']:diff(rounds[i-1].t, r.t).map(x=>x.key==='price'?`Price ${r.t.price>rounds[i-1].t.price?'+':'−'}${money(Math.abs(r.t.price-rounds[i-1].t.price))}`:`${x.label} → ${x.now}`)).map(x=>`<li>${esc(x)}</li>`).join('')}</ul></div>`).join('')}<div class="tbox now"><div class="th"><span>Your counter #${C.n}</span><b>${money(t.price)}</b></div><div class="dt">You, drafting</div><ul>${dt.map(x=>x.key==='price'?`Price ${t.price>C.pt.price?'+':'−'}${money(Math.abs(t.price-C.pt.price))}`:`${x.label} → ${x.now}`).map(x=>`<li>${esc(x)}</li>`).join('')||'<li>No changes yet</li>'}</ul></div></div></div>`;
+}
+
+function later(){ clearTimeout(later.t); later.t = setTimeout(render, 0); }
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-scen],[data-tg],[data-stage],[data-act],[data-rq],[data-dl],[data-rmreq]'); if(!t) return;
+  if(t.dataset.scen){ K = t.dataset.scen; history.replaceState(null,'','?as='+K); init(); render(); window.scrollTo({top:0}); return; }
+  if(t.dataset.tg){ C.on[t.dataset.tg] = !C.on[t.dataset.tg]; render(); return; }
+  if(t.dataset.stage){ if(t.disabled) return; stage = t.dataset.stage; enterAnim = true; render(); window.scrollTo({top:0}); return; }
+  if(t.dataset.rq){ C.resp[t.dataset.rq].s = t.dataset.s; render(); return; }
+  if(t.dataset.dl){ C.dl = t.dataset.dl; render(); return; }
+  if(t.dataset.rmreq){ C.newReq.splice(Number(t.dataset.rmreq),1); render(); return; }
+  const a = t.dataset.act;
+  if(a==='more'){ C.moreOpen = true; render(); }
+  else if(a==='addReq'){ if(!C.nrType){ toast('Choose the type of request'); return; } if(!C.nrText.trim()){ toast('Describe your request first'); return; } if(C.nrType==='CREDITS' && !num(C.nrAmt)){ toast('A credit needs its dollar amount'); return; } C.newReq.push({ type:C.nrType, text:C.nrText.trim(), amount:C.nrType==='CREDITS'?num(C.nrAmt):null }); C.nrText=''; C.nrAmt=''; render(); }
+  else if(a==='sign'){ stage = 'waiting'; enterAnim = true; toast('Signed in DocuSign'); render(); window.scrollTo({top:0}); }
+  else if(a==='cosigned'){ stage = 'sent'; enterAnim = true; render(); window.scrollTo({top:0}); }
+});
+function keepFocus(el){ const attr = el.dataset.v!==undefined?'v':el.dataset.note!==undefined?'note':'nr'; const id = el.dataset[attr]; const pos = el.selectionStart; render(); const n = document.querySelector(`[data-${attr}="${id}"]`); if(n && n.tagName==='INPUT' && n.type==='text'){ n.focus(); try{ n.setSelectionRange(pos,pos); }catch(_){} } }
+document.addEventListener('input', e => {
+  const el = e.target;
+  if(el.dataset.v !== undefined){ C.v[el.dataset.v] = el.value; if(el.tagName==='INPUT' && el.type==='text') keepFocus(el); return; }
+  if(el.dataset.note !== undefined){ C.resp[el.dataset.note].note = el.value; keepFocus(el); return; }
+  if(el.dataset.nr === 'text'){ C.nrText = el.value; return; }
+  if(el.dataset.nr === 'amt'){ C.nrAmt = el.value; return; }
+  if(el.dataset.c === 'message'){ C.message = el.value; return; }
+});
+document.addEventListener('change', e => {
+  const el = e.target;
+  if(el.dataset.v !== undefined){ C.v[el.dataset.v] = el.value; later(); return; }
+  if(el.dataset.nr === 'type'){ C.nrType = el.value; later(); return; }
+  if(el.dataset.c === 'dlDate'){ C.dlDate = el.value; later(); return; }
+  if(el.dataset.c === 'dlTime'){ C.dlTime = el.value; later(); return; }
+});
+init(); render();
+</script>
+</body>
+</html>

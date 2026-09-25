@@ -1,0 +1,343 @@
+<!doctype html>
+<html lang="en" data-theme="light">
+<head>
+<meta charset="utf-8">
+<meta name="color-scheme" content="light">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Offer Details</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link href="https://fonts.googleapis.com/css2?family=Manrope:wght@400;600;700;800&display=swap" rel="stylesheet">
+<link rel="stylesheet" href="css/tokens.css">
+<link rel="stylesheet" href="css/base.css">
+<link rel="stylesheet" href="css/layout.css">
+<link rel="stylesheet" href="css/components.css">
+<link rel="stylesheet" href="css/motion.css">
+<link rel="stylesheet" href="css/offers.css">
+</head>
+<body>
+
+<div class="proto-bar"><div class="proto-bar-in">
+  <span class="lbl">PROTOTYPE</span>
+  <div class="proto-seg" id="scenSeg">
+    <button type="button" data-scen="seller-r1">Seller · offer</button>
+    <button type="button" data-scen="buyer-r2">Buyer · counter #1</button>
+    <button type="button" data-scen="seller-r3">Seller · counter #2</button>
+    <button type="button" data-scen="buyer-sent">Buyer · waiting</button>
+  </div>
+  <div class="proto-seg" id="stateSeg">
+    <button type="button" data-state="turn">On time</button>
+    <button type="button" data-state="final">Final hour</button>
+    <button type="button" data-state="expired">Expired</button>
+  </div>
+  <div class="proto-seg" id="entrySeg">
+    <button type="button" data-entry="email">From the email</button>
+    <button type="button" data-entry="page">Page</button>
+  </div>
+  <span class="sp"></span>
+  <a href="index.html">All pages</a>
+</div></div>
+
+<div class="app-shell">
+  <div class="nav-bar">
+    <div class="nav-slot nav-slot-start"><a class="nav-pill nav-back" id="navBack" href="#"><i data-lucide="arrow-left" class="icon"></i><span></span></a></div>
+    <a class="brand" href="index.html" aria-label="DIY Residential home"><img src="assets/icons/logo-symbol.svg" width="25.667" height="25.667" alt="" class="brand-symbol"><span>DIY Residential</span></a>
+    <div class="nav-slot nav-slot-end"><div class="nav-user" id="navUser"></div></div>
+  </div>
+  <div id="screen-area" class="screen-area"></div>
+</div>
+<div id="dlgRoot"></div>
+<div class="toast" id="toast"></div>
+
+<script src="https://cdn.jsdelivr.net/npm/lucide@1.47.0/dist/umd/lucide.min.js"></script>
+<script src="negotiation.js"></script>
+<script>
+const SCEN = {
+  'seller-r1': { viewer:'SELLER', idx:0, now:'2026-09-24T15:18:00', counter:'seller-c1' },
+  'buyer-r2':  { viewer:'BUYER',  idx:1, now:'2026-09-27T12:52:00', counter:'buyer-c2' },
+  'seller-r3': { viewer:'SELLER', idx:2, now:'2026-09-30T10:40:00', counter:'seller-c3' },
+  'buyer-sent':{ viewer:'BUYER',  idx:0, now:'2026-09-23T15:02:00', counter:null }
+};
+const qs = new URLSearchParams(location.search);
+const V = { scen: SCEN[qs.get('as')] ? qs.get('as') : 'seller-r1', state:'turn', entry: qs.get('as') ? 'page' : 'email', phase:'', netOpen:false, payoffEdit:false, payoff:NET_FIXED.payoff, liens:'', cmpBase:'prev', showTable:false, dlg:null, dec:{ step:1, reason:'', comment:'', share:false }, ext:{ date:'', time:'' }, ack:false, viewerOverride:null, tab:'summary', negView:'rounds' };
+
+function ctx(){
+  const s = SCEN[V.scen];
+  const viewer = V.viewerOverride || s.viewer;
+  const cur = ROUNDS[s.idx], prev = ROUNDS[s.idx-1] || null, rounds = ROUNDS.slice(0, s.idx+1);
+  const me = viewer === 'SELLER' ? SELLERS : BUYERS, them = viewer === 'SELLER' ? BUYERS : SELLERS;
+  const localIso = d => new Date(d.getTime() - d.getTimezoneOffset()*60e3).toISOString().slice(0,19);
+  const now = V.state === 'final' ? localIso(new Date(dateObj(cur.expires).getTime() - 40*60e3)) : V.state === 'expired' ? '2026-10-03T09:00:00' : s.now;
+  const myTurn = cur.by !== viewer;
+  const noun = cur.n === 1 ? 'offer' : 'counteroffer';
+  return { s, viewer, cur, prev, rounds, me, them, now, myTurn, noun, expired: V.state === 'expired' };
+}
+const lane = by => by === 'BUYER' ? 'b' : 's';
+const sideName = (by, viewer) => by === viewer ? 'You' : (by === 'SELLER' ? SELLERS.names : BUYERS.names);
+const terminal = () => ['declined','withdrawn','accepted','ack','bound'].includes(V.phase);
+const conts = t => t.method === 'CASH' ? ['Inspection','Appraisal'] : ['Inspection','Appraisal','Financing'];
+function statusOf(r, c){
+  if(r.n < c.cur.n) return { t:'Countered', c:'badge-muted' };
+  if(V.phase === 'bound') return { t:'Accepted · under contract', c:'badge-primary' };
+  if(['accepted','ack'].includes(V.phase)) return { t:'Accepted', c:'badge-green' };
+  if(V.phase === 'declined') return { t:'Not accepted', c:'badge-danger' };
+  if(V.phase === 'withdrawn') return { t:'Withdrawn', c:'badge-muted' };
+  if(c.expired) return { t:'Expired', c:'badge-danger' };
+  if(['accept-sign','accept-cosign','decline-sign'].includes(V.phase)) return { t:'Response being signed', c:'badge-soft' };
+  return c.myTurn ? { t:'Your turn', c:'badge-secondary' } : { t:`Waiting on ${c.them.short}`, c:'badge-muted' };
+}
+
+function render(){
+  const c = ctx();
+  $$('#scenSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.scen === V.scen));
+  $$('#stateSeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.state === V.state));
+  $$('#entrySeg button').forEach(b => b.setAttribute('aria-pressed', b.dataset.entry === V.entry));
+  $('#navBack span').textContent = c.viewer === 'SELLER' ? 'Offers received' : 'Offers made';
+  $('#navUser').innerHTML = `<span>${c.me.people[0].n}</span><span class="avatar ${c.viewer==='BUYER'?'gold':''}">${c.me.people[0].i}</span>`;
+  $('#screen-area').innerHTML = V.entry === 'email' ? emailView(c) : pageView(c);
+  $('#dlgRoot').innerHTML = V.dlg ? dialog(c) : '';
+  refreshIcons();
+}
+
+function emailView(c){
+  const r = c.cur, seller = c.viewer === 'SELLER';
+  const brand = `<div class="mail-brand"><img src="assets/icons/logo-symbol.svg" width="22" height="22" alt="">DIY Residential</div>`;
+  const wrap = (to, ch, inner, foot) => `<div class="screen-fullbleed"><div class="mail-wrap"><p class="p-sm text-muted" style="text-align:center">This is where it starts: the notification, by email and text. The button opens the page.</p><div class="mail"><div class="mail-h"><span>To ${to}</span><span>${ch}</span></div>${brand}<div class="mail-b">${inner}</div><div class="mail-f">${foot}</div></div></div></div>`;
+  if(c.viewer === 'BUYER' && r.by === 'BUYER') return wrap(BUYERS.names, 'Email', `<p class="h4">Your offer was submitted</p><p>Every buyer has signed, and your offer of <b>${money(r.t.price)}</b> on <b>${HOME.address}</b> is with the seller.</p><div class="kv"><span>Seller responds by</span><b>${fmtDT(r.expires).replace(' CT','')}</b></div><button type="button" class="btn btn-primary" data-entry="page">View my offer</button>`, "You're receiving this because you made an offer through DIY Residential.");
+  const subj = r.n === 1 ? "🏠 You've Received an Offer!" : "🔄 You've Received a Counteroffer!";
+  const body = r.n === 1
+    ? `<p>An offer has been submitted on your property at <b>${HOME.address}, ${HOME.city}</b>.</p><div class="kv"><span>Offer</span><b>${money(r.t.price)}</b></div><div class="kv"><span>Expires</span><b>${fmtDT(r.expires).replace(' CT','')}</b></div><p>Please review the complete offer as soon as possible. You can Accept, Counter, or Decline after reviewing the terms.</p>`
+    : `<p>The ${r.by==='SELLER'?'seller has responded to your offer':'buyer has responded to your counteroffer'} on <b>${HOME.address}</b> with a counteroffer.${c.s.idx===2?' This is round three.':''}</p><div class="kv"><span>Counteroffer price</span><b>${money(r.t.price)}</b></div><div class="kv"><span>Expires</span><b>${fmtDT(r.expires).replace(' CT','')}</b></div><p>Please review the counteroffer carefully, including all changes to the price, terms, and conditions. You can Accept, Counter, or Decline after reviewing the complete counteroffer.</p>`;
+  return wrap(seller ? 'Rick Marino' : BUYERS.names, 'Email &amp; text', `<p class="h4">${subj}</p>${body}<div class="row-actions"><span class="badge badge-green">Accept</span><span class="badge badge-muted">Counter</span><span class="badge badge-danger">Decline</span></div><button type="button" class="btn btn-primary" data-entry="page">${r.n===1?'Review Offer':'Review Counteroffer'}</button>`, seller ? "You're receiving this because you listed 1428 Lakeshore Dr with DIY Residential." : "You're receiving this because you made an offer through DIY Residential.");
+}
+
+function pageView(c){
+  const r = c.cur;
+  const title = c.viewer === 'SELLER' ? (r.n === 1 ? `Offer from ${BUYERS.names}` : `${r.kind} from ${BUYERS.names}`) : (r.by === 'BUYER' ? 'Your offer' : `${r.kind} from ${SELLERS.names}`);
+  const st = statusOf(r, c);
+  const desc = c.myTurn && !c.expired && !V.phase ? `Review what ${c.them.short} ${r.n===1?'proposed':'changed'}, then accept, counter or decline before ${fmtDT(r.expires)}.` : !c.myTurn && !V.phase && !c.expired ? `${c.them.names} can accept, counter or decline until ${fmtDT(r.expires)}.` : '';
+  const actions = !c.expired && !V.phase && c.myTurn;
+  const waiting = !c.expired && !V.phase && !c.myTurn;
+  const foot = actions ? `<div class="footer-bar"><div class="footer-bar-inner"><span class="p-sm text-muted">${V.state==='final'?`<b style="color:var(--danger)">40 min left</b>`:`<b style="color:var(--foreground)">${left(c.now, r.expires)}</b> left to respond`}</span><div class="footer-bar-actions"><button type="button" class="btn btn-danger" data-dlg="decline">Decline</button><a class="btn btn-outline" href="03-counter.html?as=${c.s.counter}">Counter</a><button type="button" class="btn btn-primary" data-dlg="accept">Accept ${money(r.t.price)}</button></div></div></div>` : waiting && c.viewer === 'BUYER' ? `<div class="footer-bar"><div class="footer-bar-inner"><span class="p-sm text-muted">Waiting on ${c.them.names}</span><div class="footer-bar-actions"><button type="button" class="btn btn-danger" data-dlg="withdraw">Withdraw offer</button></div></div></div>` : '';
+  return `<div class="screen-working"><div class="main-split-container"><div class="split-zones"><div class="zone-content"><div class="screen-text-block"><div class="screen-crumbs"><a href="#">${c.viewer==='SELLER'?'Offers received':'Offers made'}</a>${icon('chevron-right',12)}<a href="${HOME.listingUrl}">${HOME.address}</a>${icon('chevron-right',12)}<span class="cur">${title}</span></div><p class="eyebrow">Round ${r.n} - ${r.kind}</p><h1 class="screen-title">${title}</h1>${desc?`<p class="screen-description">${desc}</p>`:''}<div class="title-badges"><span class="badge ${st.c}"><i></i>${st.t}</span>${r.t.method==='CASH'?'<span class="badge badge-outline">Cash offer</span>':''}</div></div>${phaseCard(c)}${V.state==='final'&&!V.phase&&c.myTurn?`<div class="banner danger">${icon('timer')}<span><b>Final hour: 40 min left.</b> Respond before ${fmtTime(r.expires)} or this ${c.noun} expires.</span></div>`:''}${c.expired&&!V.phase?expiredCard(c):''}${decision(c)}${tabs(c)}</div><aside class="zone-rail">${railView(c)}</aside></div></div>${foot}</div>`;
+}
+
+function expiredCard(c){
+  const r = c.cur;
+  const copy = c.myTurn ? (c.viewer==='SELLER' ? `The response deadline of ${fmtDT(r.expires)} passed without a response, so this ${c.noun} expired. If you would still like to consider it, you may request that the buyer submit a new offer.` : `The response deadline of ${fmtDT(r.expires)} passed without a response, so this ${c.noun} expired. If you remain interested in the property, you may choose to submit a new offer.`) : `${c.them.names} did not respond before ${fmtDT(r.expires)}. Your ${c.noun} has expired and is no longer active.`;
+  return `<div class="card phase bad"><span class="badge badge-danger">Offer expired</span><p class="h4">Nobody can act on this ${c.noun} anymore</p><p class="p-sm text-alt">${copy}</p>${c.s.idx===0&&c.viewer==='BUYER'?'<p class="p-mini text-muted">Your $49 fee is refunded.</p>':''}</div>`;
+}
+
+const TAB_NAMES = { summary:'Summary', changed:'What changed', negotiation:'Negotiation', documents:'Documents' };
+function netParts(c){
+  const t = c.cur.t, n = net(t, V.payoff);
+  const breakdown = `<div class="row-actions"><button type="button" class="btn-link" data-act="net">${V.netOpen?'Hide breakdown':'How is the net estimated?'}</button><button type="button" class="btn-link" data-act="payoff">${V.payoffEdit?'Close':'Edit payoff estimates'}</button></div>${V.payoffEdit?`<div class="inset stack-md"><div class="field-grid dense"><div class="field"><label>Mortgage payoff (approx.)</label><div class="field-icon-input"><span class="affix">$</span><input type="text" id="payoffIn" value="${commas(V.payoff)}"></div></div><div class="field"><label>Other liens payoff (approx.)</label><div class="field-icon-input"><span class="affix">$</span><input type="text" id="liensIn" value="${esc(V.liens)}" placeholder="0"></div></div></div><div class="row-actions"><button type="button" class="btn btn-primary btn-sm" data-act="savePayoff">Save estimates</button><span class="field-hint">Saved to your listing questionnaire. Only you see these, never the buyer.</span></div></div>`:''}${V.netOpen?`<div class="inset"><div class="lines">${n.lines.map(([k,v,src])=>`<div><span>${k}<span class="src">${src}</span></span><span class="${v===null?'ni':''}">${v===null?'Not included':(v<0?'−':'')+money(Math.abs(v))}</span></div>`).join('')}<div class="tot"><span>Estimated net to you</span><span>${money(n.total)}</span></div></div></div>`:''}<p class="field-hint">An estimate from this round's terms and your own figures, not a settlement statement. Your closing statement comes from the title company.</p>`;
+  const row = `<div class="kv-row net"><span class="k">Estimated net to you <span class="badge badge-neutral" style="margin-left:6px;padding:2px 6px;font-size:10px">ESTIMATE</span></span><span class="v">${n.missingPayoff?'<span class="p-sm">Add your mortgage payoff</span>':money(n.total)}</span></div>`;
+  return { row, breakdown };
+}
+function decision(c){
+  const r = c.cur, t = r.t, seller = c.viewer === 'SELLER';
+  const vsList = t.price - HOME.list;
+  const dl = c.expired || terminal() ? '' : `<div class="deadline ${V.state==='final'?'urgent':c.myTurn?'':'calm'}"><div><div class="lab">${c.myTurn?(r.n===1?'Offer expires in':'Counter expires in'):`${c.them.short} have until`}</div><div class="val">${c.myTurn?left(c.now, r.expires):fmtTime(r.expires)+' · '+fmtShort(r.expires)}</div></div><div class="abs">${fmtDay(r.expires)}<br>${fmtTime(r.expires)} Central${r.expSource==='EMITTER'?'<br>chosen by '+(r.by==='SELLER'?'the sellers':'the buyers'):''}</div></div>`;
+  const tags = [`<span class="badge badge-muted">${seller?'You listed at':'Listed at'} ${money(HOME.list)}</span>`];
+  if(c.prev){ const d = t.price - c.prev.t.price; tags.push(`<span class="badge badge-soft">${money(Math.abs(d))} ${d<0?'below':'above'} ${c.prev.by===c.viewer?'your':'their'} ${c.prev.n===1?'offer':'counter'}</span>`); }
+  else tags.push(`<span class="badge badge-soft">${money(Math.abs(vsList))} ${vsList<0?'below':'above'} list (${(vsList/HOME.list*100).toFixed(1)}%)</span>`);
+  let key;
+  if(c.prev){
+    const d = diff(c.prev.t, t), rq = requestDiff(c.prev.t, t), all = d.length + rq.length;
+    key = `<div class="stack-xs"><span class="section-label" style="margin:0">WHAT THEY CHANGED</span><div class="diff-list">${d.slice(0,3).map(x => `<div class="diff-row"><span class="k">${x.label}</span><span class="v"><span class="was">${x.was}</span><span class="to">→</span><span class="now">${x.now}</span></span></div>`).join('')}</div>${all>3?`<button type="button" class="btn-link" data-tab="changed" style="align-self:flex-start">See all ${all} changes</button>`:''}</div>`;
+  } else {
+    const facts = [[t.method==='CASH'?'banknote':'landmark', t.method==='CASH'?'Cash':FIN(t), t.method==='CASH'?'Proof of funds '+t.pof.toLowerCase():'Pre-approval attached'], ['calendar', `Closing ${fmtShort(t.closing)}`, `${daysBetween(c.now.slice(0,10), t.closing)} days from today`], ['shield-check', CONTS(t).join(' · ')||'No contingencies', `Inspection ${INSP(t)}`], ['hand-coins', `Earnest money ${money(t.em)}`, `${(t.em/t.price*100).toFixed(1)}% · within ${t.emDays} days`]];
+    key = `<div class="key-facts">${facts.map(([ic,a,b])=>`<div class="key-fact">${icon(ic)}<div><b>${a}</b><span>${b}</span></div></div>`).join('')}</div>`;
+  }
+  return `<div class="card flush" id="decision"><div class="card-head"><div><p class="h4">${seller?'Offer summary':r.by==='BUYER'?'Your offer at a glance':'Their counter at a glance'}</p><p class="p-sm">${r.kind} · sent ${fmtShort(r.sent)} at ${fmtTime(r.sent)} by ${sideName(r.by, c.viewer)}</p></div></div><div class="card-body stack-md">${dl}<div class="big-price"><span class="p">${money(t.price)}</span>${tags.join('')}</div>${key}${seller?netParts(c).row+`<button type="button" class="btn-link" data-tab="summary" data-open-net="1" style="align-self:flex-start">See how it's estimated</button>`:''}</div></div>`;
+}
+function summaryTab(c){
+  const r = c.cur, t = r.t, p = c.prev ? c.prev.t : null, seller = c.viewer === 'SELLER';
+  const chg = k => p && !same(p, t, k);
+  const was = k => chg(k) ? `<em>was ${TERMS.find(x=>x.key===k).f(p)}</em>` : '';
+  const row = (label, v, key) => `<div class="kv-row ${key&&chg(key)?'chg':''}"><span class="k">${label}${key&&chg(key)?'<small>Changed this round</small>':''}</span><span class="v">${v}${key?was(key):''}</span></div>`;
+  const concLines = [t.concession?`Concession: ${CONC(t)}`:null, t.comp?`Buyer's agent: ${money(t.comp.amount)}`:null, ...t.requests.filter(q=>q.type==='CREDITS').map(q=>`Credit: ${q.text}`)].filter(Boolean);
+  const reqIcon = s => s==='ACCEPTED'?['ok','check','Agreed']:s==='DECLINED'?['no','x','Declined']:['','minus','Requested'];
+  const tl = [[`Submitted`, `${fmtShort(ROUNDS[0].sent)}, ${fmtTime(ROUNDS[0].sent)}`], [`Paid $49 offer fee`, fmtShort(ROUNDS[0].sent)], [`Signed by every buyer and sent`, `${fmtShort(ROUNDS[0].sent)}, ${fmtTime(ROUNDS[0].sent)}`], ...c.rounds.slice(1).map(x=>[`${x.kind} signed and sent by ${x.by==='SELLER'?'the sellers':'the buyers'}`, `${fmtShort(x.sent)}, ${fmtTime(x.sent)}`])];
+  const grp = t => `<span class="section-label" style="margin:var(--space-md) 0 0">${t}</span>`;
+  const np = seller ? netParts(c) : null;
+  return `<div class="kv-list">
+    ${grp('THE DEAL')}
+    ${row('Purchase price', `${money(t.price)}<em>${t.price-HOME.list<0?'−':'+'}${money(Math.abs(t.price-HOME.list))} vs list</em>`, 'price')}
+    ${row('Paying with', `${t.method==='CASH'?'Cash':FIN(t)}<em>${t.method==='CASH'?'No down payment · proof of funds '+t.pof.toLowerCase():'Pre-approval attached · '+(t.finCont?'financing contingency':'no financing contingency')}</em>`, 'method')}
+    ${row('Earnest money', `${money(t.em)}<em>${(t.em/t.price*100).toFixed(1)}% · within ${t.emDays} days of the Binding Agreement · held by ${t.emHolder}</em>`, 'em')}
+    ${row('Closing date', `${fmtDay(t.closing)}<em>${daysBetween(c.now.slice(0,10), t.closing)} days from today · seller's closing agency ${t.closingAgency}</em>`, 'closing')}
+    ${row('Possession', `${POSS(t)}<em>${t.possession==='TOA'?'Occupancy agreement attached':'Keys at closing'}</em>`, 'possession')}
+    ${grp('PROTECTIONS')}
+    <div class="kv-row ${p&&(p.appraisal!==t.appraisal||p.inspCont!==t.inspCont)?'chg':''}"><span class="k">Contingencies${p&&p.appraisal!==t.appraisal?'<small>Changed this round</small>':''}</span><span class="v"><span class="chips">${conts(t).map(x=>`<span class="chip ${CONTS(t).includes(x)?'on':'off'}">${x}</span>`).join('')}</span><em>Inspection ${INSP(t)} · final walk ${t.finalInsp} day before closing</em></span></div>
+    ${grp('WHO PAYS WHAT')}
+    ${row('Seller concessions', concLines.length?concLines.join('<br>'):'None requested')}
+    ${row('Title expenses', TITLE(t), 'title')}
+    ${row('Home warranty', WARR(t), 'warranty')}
+    ${row('Special assessment', t.sa==='SELLER'?'Seller pays at closing':'Buyer does not assume', 'sa')}
+    ${grp('ITEMS')}
+    ${row('Buyer keeps', `${t.included}<em>${t.excluded} excluded · leased items ${t.leased.toLowerCase()}</em>`)}
+  </div>${seller?`<div class="stack-s">${np.row}${np.breakdown}</div>`:''}
+  <div class="stack-xs"><span class="section-label" style="margin:0">REQUESTS &amp; STIPULATIONS</span><div>${t.requests.map(q=>{ const [cls,ic,lab]=reqIcon(q.status==='PENDING'&&['accepted','ack','bound'].includes(V.phase)?'ACCEPTED':q.status); return `<div class="req"><span class="ic ${cls}">${icon(ic)}</span><div><b>${esc(q.text)}</b><span>${({INCLUSIONS:'Inclusion',EXCLUSIONS:'Exclusion',REPAIRS:'Repair',CREDITS:'Credit'})[q.type]} · ${lab}</span>${q.note?`<i>“${esc(q.note)}”</i>`:''}</div></div>`; }).join('')}</div></div>
+  ${r.message?`<div class="stack-xs"><span class="section-label" style="margin:0">MESSAGE FROM ${r.by==='BUYER'?'THE BUYERS':'THE SELLERS'}</span><div class="rc-q" style="font-size:14px;line-height:20px">“${esc(r.message)}”</div></div>`:''}
+  <div class="row-actions"><button type="button" class="btn btn-outline btn-sm" data-toast="Opens the proof of funds in a new tab">${icon('file-text',16)}View proof of funds</button></div>
+  <details class="disclosure"><summary>${icon('history')}Status history<span class="chev">${icon('chevron-down')}</span></summary><div class="disclosure-body"><div class="tl">${tl.map((x,i)=>`<div class="tl-i ${i===tl.length-1?'now':'done'}"><b>${x[0]}</b><span>${x[1]}</span></div>`).join('')}</div></div></details>`;
+}
+function changesTab(c){
+  const base = V.cmpBase === 'root' ? ROUNDS[0] : c.prev;
+  const d = diff(base.t, c.cur.t), rq = requestDiff(base.t, c.cur.t);
+  const rows = d.map(x => `<div class="diff-row"><span class="k">${x.label}<small>RF 401 · lines ${x.lines}</small></span><span class="v"><span class="was">${x.was}</span><span class="to">→</span><span class="now">${x.now}</span></span></div>`).join('') + rq.map(x => `<div class="diff-row"><span class="k">${esc(x.label)}${x.note?`<small>“${esc(x.note)}”</small>`:''}</span><span class="v"><span class="was">${x.was}</span><span class="to">→</span><span class="now ${x.now==='Declined'?'neg':''}">${x.now}</span></span></div>`).join('');
+  return `<div class="tab-toolbar"><p class="p-sm text-muted">${V.cmpBase==='root'?'Since the original offer':`From ${c.prev.by===c.viewer?'your':'their'} ${c.prev.n===1?'offer':'counter'}`}</p><div class="segmented" style="width:auto;align-self:auto"><button type="button" class="${V.cmpBase==='prev'?'active':''}" data-base="prev" style="flex:0 0 auto">Last round</button><button type="button" class="${V.cmpBase==='root'?'active':''}" data-base="root" style="flex:0 0 auto">Original offer</button></div></div><div class="diff-list">${rows||'<p class="stands">Nothing changed.</p>'}</div><p class="stands">${V.cmpBase==='root'?'This is the baseline the counter form itself uses. Each counter restates every change still in force against the original agreement, so nothing is quietly voided by the boilerplate.':`Every other term of ${c.prev.by===c.viewer?'your':'their'} ${c.prev.n===1?'offer':'counter'} stands unchanged.`}</p>`;
+}
+function negotiationTab(c){
+  const rounds = c.rounds;
+  const cards = rounds.map((r, i) => {
+    const p = rounds[i-1];
+    const d = p ? diff(p.t, r.t) : [];
+    const rq = p ? requestDiff(p.t, r.t) : [];
+    const items = r.n === 1 ? ['Opening terms', `${r.t.method==='CASH'?'Cash':'Financed'} · closing ${fmtShort(r.t.closing)}`, `Asks: ${r.t.requests.map(q=>q.text).join('; ')}`] : d.map(x => x.key==='price' ? `Price ${r.t.price>p.t.price?'+':'−'}${money(Math.abs(r.t.price-p.t.price))}` : `${x.label}: ${x.now}`);
+    const st = statusOf(r, c);
+    const isCur = i === rounds.length - 1;
+    const docState = r.n < c.cur.n ? (r.n === 1 ? 'Signed by both sides' : 'Signed, then superseded') : V.phase==='declined' ? 'Signed as not accepted' : V.phase==='withdrawn' ? 'Voided' : ['accepted','ack','bound'].includes(V.phase) ? 'Signed as accepted by both sides' : c.myTurn ? `Signed by ${r.by==='BUYER'?'the buyers':'the sellers'} · waiting on your signature` : 'Signed by you · with them now';
+    const card = `<div class="rc ${lane(r.by)} ${isCur?'cur':''}"><div class="rc-h"><div><div class="rc-k">${r.kind}</div><div class="rc-w">${sideName(r.by, c.viewer)} · ${fmtShort(r.sent)}, ${fmtTime(r.sent)}</div></div><span class="badge ${st.c}">${st.t}</span></div><div class="rc-p">${money(r.t.price)}</div><ul class="rc-ch">${items.map(x=>`<li>${esc(x)}</li>`).join('')}${rq.filter(x=>x.now==='Declined').map(x=>`<li class="no">${esc(x.label.replace('Request · ',''))} declined</li>`).join('')}</ul>${r.message?`<div class="rc-q">“${esc(r.message)}”</div>`:''}<div class="rc-d"><span>${r.form} · ${docState}</span><button type="button" class="btn-link" data-tab="documents" style="font-size:12px">Open PDF</button></div></div>`;
+    const mid = `<div class="pp-mid"><span class="pp-n ${isCur?'cur':'done'}">${r.n}</span></div>`;
+    return r.by === 'BUYER' ? card + mid + '<div class="gap"></div>' : '<div class="gap"></div>' + mid + card;
+  }).join('');
+  const nextHint = !V.phase && !c.expired ? `<div class="gap"></div><div class="pp-mid"><span class="pp-n next">${c.cur.n+1}</span></div><div class="gap"></div>` : '';
+  const a = c.rounds.filter(r=>r.by===c.viewer).slice(-1)[0], b = c.rounds.filter(r=>r.by!==c.viewer).slice(-1)[0];
+  const table = `<div class="cmpwrap"><table class="cmp"><thead><tr><th class="term">Term</th>${rounds.map((r,i)=>`<th class="${i===rounds.length-1?'cur':''}">${r.n===1?(r.by===c.viewer?'Your offer':'Their offer'):(r.by===c.viewer?'Your ':'Their ')+r.kind.replace('Counter offer','counter')}<span class="who">${sideName(r.by,c.viewer)} · ${fmtShort(r.sent)}</span></th>`).join('')}</tr></thead><tbody>${TERMS.map(x=>`<tr><td class="term">${x.label}</td>${rounds.map((r,i)=>{ const ref = V.cmpBase==='root'?rounds[0].t:(rounds[i-1]||r).t; const ch = i>0 && !same(ref, r.t, x.key); return `<td class="${ch?'chg':'same'}">${esc(x.f(r.t))}</td>`; }).join('')}</tr>`).join('')}</tbody></table></div>`;
+  const gapLine = rounds.length>1&&a&&b?`<p class="p-sm text-muted">${b.by===c.viewer?'You':c.them.short} ${b.t.price<a.t.price?'came down':'went up'} to ${money(b.t.price)}. The gap is now <b style="color:var(--foreground)">${money(Math.abs(a.t.price-b.t.price))}</b> (${(Math.abs(a.t.price-b.t.price)/Math.max(a.t.price,b.t.price)*100).toFixed(1)}%).</p>`:'';
+  const views = `<div class="tab-toolbar"><p class="p-sm text-muted">Round ${c.cur.n} · every round, both sides, oldest first</p><div class="segmented" style="width:auto;align-self:auto">${[['rounds','Rounds'],['chart','Price chart'],['table','Every term']].map(([k,l])=>`<button type="button" class="${V.negView===k?'active':''}" data-neg="${k}" style="flex:0 0 auto">${l}</button>`).join('')}</div></div>`;
+  if(V.negView==='chart') return views + gapLine + priceChart(c);
+  if(V.negView==='table') return views + gapLine + table;
+  return views + gapLine + `<div class="pp"><div class="pp-lane b"><span class="avatar gold sm">DW</span>${c.viewer==='BUYER'?'You (buyers)':'Buyers'}</div><div></div><div class="pp-lane s">${c.viewer==='SELLER'?'You (sellers)':'Sellers'}<span class="avatar sm">RM</span></div>${cards}${nextHint}</div>`;
+}
+
+function priceChart(c){
+  const rounds = c.rounds, L = HOME.list;
+  const marks = [0, 2, 5, 10];
+  const minP = Math.min(...rounds.map(r=>r.t.price));
+  const lo = Math.min(L*0.88, minP*0.985), hi = L*1.012;
+  const W = 760, left = 150, right = 24, top = 44, rowH = 56, H = top + rounds.length*rowH + 44;
+  const x = p => left + (p - lo) / (hi - lo) * (W - left - right);
+  const base = top + rounds.length*rowH + 8;
+  const col = by => by === 'BUYER' ? '#c77a26' : '#12805c';
+  const grid = marks.map(m => { const p = L*(1-m/100), X = x(p).toFixed(1); return `<line x1="${X}" y1="${top-10}" x2="${X}" y2="${base}" class="pc-grid ${m===0?'list':''}"/><text x="${X}" y="${top-18}" text-anchor="middle" class="pc-top">${m===0?'List price':'−'+m+'%'}</text><line x1="${X}" y1="${base}" x2="${X}" y2="${base+5}" class="pc-tick"/><text x="${X}" y="${base+20}" text-anchor="middle" class="pc-axis">${money(p)}</text>`; }).join('');
+  const pts = rounds.map((r,i) => [x(r.t.price), top + i*rowH + rowH/2]);
+  const rows = rounds.map((r,i) => { const y = top + i*rowH + rowH/2; return `<line x1="${left}" y1="${y}" x2="${W-right}" y2="${y}" class="pc-row"/><text x="0" y="${y-3}" class="pc-lab">${r.n===1?'Original offer':r.kind.replace('Counter offer','Counter')}</text><text x="0" y="${y+13}" class="pc-sub">${r.by==='BUYER'?'Buyers':'Sellers'} · ${fmtShort(r.sent)}</text>`; }).join('');
+  const last = rounds[rounds.length-1], prev = rounds[rounds.length-2];
+  const gap = prev ? (() => { const a = x(Math.min(last.t.price, prev.t.price)), b2 = x(Math.max(last.t.price, prev.t.price)), y = top + (rounds.length-1)*rowH + rowH/2; return `<rect x="${a}" y="${y-16}" width="${b2-a}" height="32" rx="6" class="pc-gap"/><text x="${(a+b2)/2}" y="${y+30}" text-anchor="middle" class="pc-gaplab">Gap ${money(Math.abs(last.t.price-prev.t.price))}</text>`; })() : '';
+  const path = pts.length>1 ? `<polyline points="${pts.map(p=>p.map(v=>v.toFixed(1)).join(',')).join(' ')}" class="pc-path"/>` : '';
+  const dots = rounds.map((r,i) => { const [X,Y] = pts[i]; const isCur = i === rounds.length-1; const pct = ((r.t.price-L)/L*100).toFixed(1); const tip = `${r.kind} · ${r.by==='BUYER'?'Buyers':'Sellers'} · ${money(r.t.price)} · ${pct}% vs list · ${fmtShort(r.sent)}`; const shape = r.by==='BUYER' ? `<circle cx="${X}" cy="${Y}" r="${isCur?8:6.5}" fill="${col(r.by)}" class="pc-dot"/>` : `<rect x="${X-(isCur?8:6.5)}" y="${Y-(isCur?8:6.5)}" width="${isCur?16:13}" height="${isCur?16:13}" rx="3" fill="${col(r.by)}" class="pc-dot"/>`; const labRight = X < W - 150; return `<g class="pc-hit" data-tip="${esc(tip)}"><circle cx="${X}" cy="${Y}" r="16" fill="transparent"/>${shape}</g><text x="${labRight?X+14:X-14}" y="${Y+5}" text-anchor="${labRight?'start':'end'}" class="pc-val ${isCur?'cur':''}">${money(r.t.price)}</text>`; }).join('');
+  return `<div class="pc"><div class="pc-legend"><span><i class="lg-b"></i>Buyers</span><span><i class="lg-s"></i>Sellers</span><span><i class="lg-list"></i>List price and % below it</span></div><div class="pc-wrap"><svg viewBox="0 0 ${W} ${H}" role="img" aria-label="Price of every round against the list price">${grid}${rows}<line x1="${left}" y1="${base}" x2="${W-right}" y2="${base}" class="pc-base"/>${gap}${path}${dots}</svg><div class="pc-tip" id="pcTip" hidden></div></div><p class="field-hint">Each row is a round, oldest at the top. The dotted lines mark the list price and 2%, 5% and 10% below it. The full numbers are in “Every term”.</p></div>`;
+}
+function documentsTab(c){
+  const rows = c.rounds.map(r => { const st = r.n < c.cur.n ? (r.n===1?['Signed','badge-green']:['Signed, then superseded','badge-muted']) : V.phase==='bound' ? ['Executed','badge-green'] : ['accepted','ack'].includes(V.phase) ? ['Signed, accepted','badge-green'] : V.phase==='declined' ? ['Signed, not accepted','badge-danger'] : V.phase==='withdrawn' ? ['Voided','badge-muted'] : c.myTurn ? ['Waiting on your signature','badge-secondary'] : ['Waiting on them','badge-muted']; return `<div class="doc"><span class="doc-ic">${r.form.replace('RF ','')}</span><div class="doc-info"><b>${r.form} · ${r.doc}</b><span>Round ${r.n} · signed by ${r.by==='BUYER'?BUYERS.short:SELLERS.short}, ${fmtShort(r.sent)}</span></div><span class="badge ${st[1]}">${st[0]}</span></div>`; }).join('');
+  const signed = c.rounds.filter(r=>r.n<c.cur.n).length + (V.phase==='bound'?1:0);
+  const parties = [...SELLERS.people.map(x=>({...x, side:'SELLER'})), ...BUYERS.people.map(x=>({...x, side:'BUYER'}))].map(p=>`<div class="oo"><span class="avatar sm ${p.side==='BUYER'?'gold':''}">${p.i}</span><div class="i"><b>${p.n}${p.side===c.viewer&&p.r.includes('account')?' · you':''}</b><span>${p.r}</span></div></div>`).join('');
+  return `<div class="tab-toolbar"><p class="p-sm text-muted">${signed} of ${c.rounds.length} signed by both sides · every signed document of the negotiation, round by round</p><button type="button" class="btn btn-outline btn-sm" data-toast="Opens Document Review">Review all</button></div><div>${rows}</div><div class="stack-xs"><span class="section-label" style="margin:0">WHO SIGNS</span><div>${parties}</div><p class="p-mini text-muted">Only account holders act here. Co-owners and co-buyers sign every round from DocuSign's email.</p></div>`;
+}
+function tabs(c){
+  const list = ['summary', ...(c.cur.n>1?['changed']:[]), 'negotiation', 'documents'];
+  if(!list.includes(V.tab)) V.tab = 'summary';
+  const count = { changed: c.cur.n>1 ? diff(c.prev.t, c.cur.t).length + requestDiff(c.prev.t, c.cur.t).length : 0, negotiation: c.rounds.length, documents: c.rounds.length };
+  const body = { summary:summaryTab, changed:changesTab, negotiation:negotiationTab, documents:documentsTab }[V.tab](c);
+  return `<div class="card flush" id="tabs"><div class="tabs-head"><div class="hd-tabs" role="tablist">${list.map(k=>`<button type="button" role="tab" class="hd-tab ${V.tab===k?'active':''}" data-tab="${k}" aria-selected="${V.tab===k}">${TAB_NAMES[k]}${count[k]?`<span class="hd-tab-count">${count[k]}</span>`:''}</button>`).join('')}</div></div><div class="card-body stack-md">${body}</div></div>`;
+}
+
+function railView(c){
+  const r = c.cur;
+  const mine = c.rounds.filter(x=>x.by===c.viewer).slice(-1)[0], theirs = c.rounds.filter(x=>x.by!==c.viewer).slice(-1)[0];
+  const aP = mine ? mine.t.price : HOME.list, aL = mine ? (mine.n===1?'Your offer':'Your counter') : (c.viewer==='SELLER'?'Your list price':'List price');
+  const bP = theirs ? theirs.t.price : HOME.list, bL = theirs ? (theirs.n===1?'Their offer':'Their counter') : 'List price';
+  const pct = Math.min(aP,bP)/Math.max(aP,bP)*100;
+  const agreed = ['accepted','ack','bound'].includes(V.phase);
+  const stat = (src, w, h, v, l, flip) => `<span class="listing-card-stat"><span class="listing-card-stat-icon${flip?' flipped':''}"><img src="assets/icons/${src}" width="${w}" height="${h}" alt=""></span>${v} ${l}</span>`;
+  const prop = `<div class="listing-card"><div class="listing-card-image cover">${c.viewer==='SELLER'?'<span class="badge badge-primary">YOUR LISTING</span>':''}</div><div class="listing-card-content"><div class="listing-card-heading"><p class="listing-card-title">${money(HOME.list)}</p><p class="listing-card-address">${HOME.address}, ${HOME.city}</p></div><div class="listing-card-stats">${stat('bed-double.svg',14.8333,13.5,HOME.beds,'beds',true)}${stat('bathtub.svg',14.8333,13.5,HOME.baths,'baths',true)}${stat('pencil-ruler.svg',16,16,HOME.sqft,'sqft')}</div><a class="btn btn-outline btn-sm" href="${HOME.listingUrl}">${c.viewer==='SELLER'?'View your listing':'View the property'}${icon('arrow-up-right',16)}</a></div></div>`;
+  const stand = `<div class="rail-card"><span class="section-label">WHERE IT STANDS</span><div class="kv-list"><div class="kv-row"><span class="k">${aL}</span><span class="v">${money(aP)}</span></div><div class="kv-row"><span class="k">${bL}</span><span class="v">${money(bP)}</span></div><div class="kv-row"><span class="k">Difference</span><span class="v">${money(Math.abs(aP-bP))}</span></div><div class="kv-row"><span class="k">Offer vs asking</span><span class="v">${((r.t.price-HOME.list)/HOME.list*100).toFixed(1)}%</span></div></div><div class="bar ${agreed||pct>=97?'green':''}"><span style="width:${agreed?100:pct.toFixed(1)}%"></span></div><div class="living-card-row"><span class="row-label">${agreed?`Agreed at ${money(r.t.price)}`:pct>=97?'Nearing agreement':'Negotiation in progress'}</span><span class="row-action ${agreed||pct>=97?'done':'pending'}">${agreed?'100%':pct.toFixed(1)+'%'}</span></div></div>`;
+  const tsent = dateObj(r.sent).getTime(), texp = dateObj(r.expires).getTime(), tnow = dateObj(c.now).getTime();
+  const ev = [[tsent, `${r.n===1?'Offer':'Counter'} received`, `${fmtShort(r.sent)}, ${fmtTime(r.sent)}`], [tsent+(texp-tsent)/2, 'Reminder at the halfway point', `Email to ${c.myTurn?'you':c.them.short}`], [texp-3600e3, 'Final hour', 'A last reminder, and a red banner here'], [texp, `${fmtTime(r.expires)} · ${r.n===1?'offer':'counter'} expires`, `Both sides are notified${r.n===1?", and the buyer's fee is refunded":''}`]];
+  const curIdx = ev.reduce((k, e, i) => e[0] <= tnow ? i : k, -1);
+  const when = t => { const d = new Date(t); return d.toLocaleDateString('en-US',{month:'short',day:'numeric'})+', '+d.toLocaleTimeString('en-US',{hour:'numeric',minute:'2-digit'}); };
+  const dl = !c.expired && !V.phase ? `<div class="rail-card"><span class="section-label">DEADLINE</span><p class="h4">${fmtShort(r.expires)}, ${fmtTime(r.expires)} CT</p><p class="p-mini text-muted">${left(c.now, r.expires)} left · printed on the ${r.form}</p><div class="tl tl-rail">${ev.map((e,i)=>`<div class="tl-i ${i<curIdx?'done':i===curIdx?'cur now':i===ev.length-1?'end':''}"><b>${e[1]}</b><span>${i===0?e[2]:i===ev.length-1?fmtShort(r.expires)+' · '+e[2]:when(e[0])+' · '+e[2]}</span>${i===curIdx?'<em class="tl-here">You are here</em>':''}</div>`).join('')}</div>${c.myTurn?`<button type="button" class="btn-link" data-dlg="time" style="align-self:flex-start">Need more time? Ask ${c.them.short}</button>`:''}</div>` : '';
+  const others = c.viewer==='SELLER' ? `<div class="rail-card"><span class="section-label">OTHER OFFERS ON YOUR HOME</span>${OTHER_OFFERS.map(o=>`<div class="oo"><div class="i"><b>${o.n}</b><span>${o.m}</span></div><div style="display:flex;flex-direction:column;align-items:flex-end;gap:4px"><span class="pz">${money(o.p)}</span><span class="badge ${o.tag}">${o.s}</span></div></div>`).join('')}<p class="p-mini text-muted">Other offers keep their own deadlines until one is accepted. The first completed acceptance wins; the rest end automatically.</p></div>` : '';
+  return prop + stand + dl + others;
+}
+
+function phaseCard(c){
+  const r = c.cur, doc = `${r.form} · ${r.doc}`;
+  const emitter = r.by === 'SELLER' ? SELLERS : BUYERS;
+  const cosigner = c.me.people[1].n, co = cosigner.split(' ')[0];
+  const signers = c.me.people.map((p,i)=>`<div class="signer"><div><b>${p.n}</b><span>${p.r}</span></div><span class="badge ${i?'badge-muted':'badge-secondary'}">${i?'Then '+p.n.split(' ')[0]+', from email':'You sign first'}</span></div>`).join('');
+  const locked = (label, sub) => `<div class="rich-row selected locked"><input type="checkbox" checked tabindex="-1"><span class="rich-row-text"><span class="rich-row-title">${label}</span><span class="rich-row-subtitle">${sub}</span></span></div>`;
+  if(V.phase === 'accept-sign') return `<div class="card phase"><span class="badge badge-secondary">Your turn: sign your response</span><p class="h3">Sign the ${r.n===1?'offer':'counter'} as accepted</p><p class="p-sm text-alt">Every ${c.viewer==='SELLER'?'owner':'buyer'} signs. ${c.them.names} are notified once all signatures are in. You can't change your answer while it waits.</p><div class="doc-step"><span class="doc-num">1</span><div class="doc-body"><span class="h4">${doc}</span><span class="p-sm text-muted">${c.them.short}'s ${c.noun}, with your response recorded on it.</span>${locked('ACCEPTS','Marked for you. No further negotiation.')}<span class="section-label" style="margin:0">SIGNATURES</span><div>${signers}</div></div></div><div class="row-actions"><button type="button" class="btn btn-primary" data-act="signAccept">Review &amp; Sign</button><button type="button" class="btn btn-outline" data-act="cancelPhase">Change my answer</button></div></div>`;
+  if(V.phase === 'accept-cosign') return `<div class="card phase"><span class="badge badge-soft">Awaiting signatures</span><p class="h3">Waiting for ${cosigner} to sign</p><p class="p-sm text-alt">You signed. ${c.them.names} learn nothing until ${co} signs too. DocuSign emailed ${co} a link.</p><div class="steps3"><div class="s3 done"><span class="n">${icon('check')}</span><div>You signed ACCEPTS<span>Just now</span></div></div><div class="s3 now"><span class="n">2</span><div>${cosigner} signs<span>From DocuSign's email</span></div></div><div class="s3"><span class="n">3</span><div>${emitter.names} acknowledge<span>That moment is the Binding Agreement Date</span></div></div></div><button type="button" class="proto-chip" data-act="cosigned">Prototype: ${co} signs</button></div>`;
+  if(V.phase === 'accepted') return `<div class="card phase good"><span class="badge badge-primary">Offer accepted</span><p class="h3">Both sides agreed at ${money(r.t.price)}</p><p class="p-sm text-alt">Your listing is now under contract, and the other offers on it ended ("The property went under contract"). One step left: ${emitter.names} acknowledge the acceptance, and that moment is the Binding Agreement Date.</p><div class="steps3"><div class="s3 done"><span class="n">${icon('check')}</span><div>Every ${c.viewer==='SELLER'?'owner':'buyer'} signed ACCEPTS</div></div><div class="s3 now"><span class="n">2</span><div>Waiting on ${emitter.short}'s acknowledgement<span>We remind them after 2, 24 and 48 hours</span></div></div></div><button type="button" class="proto-chip" data-act="toAck">Prototype: switch to ${emitter.short}'s view</button></div>`;
+  if(V.phase === 'ack'){ const accepter = r.by === 'SELLER' ? 'buyers have' : 'seller has'; return `<div class="mail"><div class="mail-h"><span>To ${emitter.names}</span><span>Email &amp; text · and here</span></div><div class="mail-b"><p class="h4">🎉 Your ${r.n===1?'Offer':'Counteroffer'} Has Been Accepted!</p><p>Good news! The ${accepter} accepted your ${r.n===1?'offer':'counteroffer'} on <b>${HOME.address}, ${HOME.city}</b>.</p><p>Please review the accepted ${r.n===1?'offer':'counteroffer'} and all related documents, then confirm that you have received notification of the ${r.by==='SELLER'?"buyers'":"seller's"} acceptance.</p><label class="checkbox-row prefill-box ${V.ack?'confirmed':''}" style="flex-direction:row"><input type="checkbox" id="ackBox" ${V.ack?'checked':''}>I acknowledge that I have been notified that my ${r.n===1?'offer':'counteroffer'} has been accepted.</label><div class="row-actions"><button type="button" class="btn btn-primary" data-act="ackDone" ${V.ack?'':'disabled'}>Acknowledge</button><button type="button" class="btn btn-outline" data-tab="documents">View accepted ${r.n===1?'offer':'counteroffer'}</button></div></div></div>`; }
+  if(V.phase === 'bound') return `<div class="card phase good"><span class="badge badge-primary">Under contract · pending</span><div class="bind"><div class="lab">Binding agreement</div><div class="val">${fmtDT(c.now)}</div><div class="sub">Every deadline in the contract counts from this moment, this is where the timeline begins. It is stamped on the executed ${r.form}.</div></div><span class="section-label" style="margin:0">YOUR PACKAGE HAS BEEN SENT TO</span><div>${[[BUYERS.names,'Buyers'],[SELLERS.names,'Sellers'],['Stewart Title','Closing agency']].map(([n,rl])=>`<div class="signer"><div><b>${n}</b><span>${rl}</span></div><span class="badge badge-green">Delivered</span></div>`).join('')}</div><p class="stands">Contract, disclosures and ${c.rounds.length===1?'the signed offer':`all ${c.rounds.length} signed rounds`} travel together as one package.</p>${c.rounds.length>1?callout('Superseded rounds stay in the chain.','They are the legal record of how the two sides got to the final terms, so the documents list shows all of them, not only the round that was accepted.'):''}<div class="row-actions"><button type="button" class="btn btn-primary" data-toast="Opens the due diligence timeline">Go to due diligence</button><button type="button" class="btn btn-outline" data-tab="documents">Review documents</button></div></div>`;
+  if(V.phase === 'decline-sign') return `<div class="card phase"><span class="badge badge-secondary">Your turn: sign your response</span><p class="h3">Sign the ${c.noun} as not accepted</p><p class="p-sm text-alt">Your answer takes effect once every ${c.viewer==='SELLER'?'owner':'buyer'} has signed. ${V.dec.share&&V.dec.reason?`Your reason (${V.dec.reason}) will be shared with ${c.them.short}.`:'Your reason stays private.'}</p><div class="doc-step"><span class="doc-num">1</span><div class="doc-body"><span class="h4">${doc}</span>${locked('REJECTS',`Marked for you. The ${c.noun} no longer exists once signed.`)}</div></div><div class="row-actions"><button type="button" class="btn btn-danger" data-act="signDecline">Review &amp; Sign</button><button type="button" class="btn btn-outline" data-act="cancelPhase">Change my answer</button></div></div>`;
+  if(V.phase === 'declined') return `<div class="card phase bad"><span class="badge badge-danger">${r.n===1?'Offer':'Counteroffer'} not accepted</span><p class="h3">${c.them.names} have been notified</p><p class="p-sm text-alt">This is the email they received.${c.viewer==='SELLER'?' Your other offers stay open.':''}</p><div class="mail"><div class="mail-h"><span>To ${c.them.names}</span><span>Email</span></div><div class="mail-b"><p class="h4">Offer Not Accepted</p><p>The ${c.viewer==='SELLER'?'seller':'buyer'} has reviewed your ${c.noun} for <b>${HOME.address}</b> and has chosen not to accept it.</p>${V.dec.share&&V.dec.reason?`<p><b>Reason:</b> ${esc(V.dec.reason)}${V.dec.comment?': '+esc(V.dec.comment):''}</p>`:''}<p>No further action is required regarding this ${c.noun}.</p>${c.viewer==='SELLER'?'<p>Thank you for your interest in the property.</p>':''}</div></div>${c.them===BUYERS&&c.s.idx===0?'<p class="p-mini text-muted">The buyers\' $49 fee is refunded.</p>':''}</div>`;
+  if(V.phase === 'withdrawn') return `<div class="card phase bad"><span class="badge badge-muted">Offer withdrawn</span><p class="h3">Your offer was withdrawn</p><p class="p-sm text-alt">The seller can no longer accept it. The agreement was voided at DocuSign and your $49 fee is on its way back to your card.</p></div>`;
+  return '';
+}
+function callout(title, html){ return `<div class="info-callout"><div class="info-callout-title">${icon('info')}${title}</div><div class="info-callout-text">${html}</div></div>`; }
+
+function dialog(c){
+  const r = c.cur, t = r.t;
+  const shell = (inner, wide) => `<div class="modal-scrim" data-close="1"><div class="modal-card" role="dialog" aria-modal="true" style="${wide?'max-width:680px':''}"><button class="modal-close" data-close="1" aria-label="Close">${icon('x',16)}</button>${inner}</div></div>`;
+  if(V.dlg === 'accept') return shell(`<div class="modal-head"><span class="badge badge-muted">Round ${r.n}</span><p class="h3">Accept ${r.n===1?'Offer':'Counter'}?</p><p class="p-sm text-muted">Make sure to review all the agreed terms.</p></div><div class="prop-row"><span class="prop-thumb sm"></span><div class="prop-meta"><b>${HOME.address}</b><span class="p-mini text-muted">${HOME.city}</span></div></div><span class="section-label" style="margin:0">AGREED TERMS</span><div class="kv-list">${[['Final purchase price',money(t.price)],['Original price',money(HOME.list)],['Target closing date',fmtDay(t.closing)],['Earnest money deposit',`${money(t.em)} (${(t.em/t.price*100).toFixed(1)}%)`],['Down payment',t.down?money(t.down):'None, cash'],['Financing method',t.method==='CASH'?'Cash':t.loanType],['Contingencies',CONTS(t).join(', ')||'None'],['Title expenses',TITLE(t)],['Home warranty',WARR(t)],['Agreed requests',t.requests.filter(q=>q.status!=='DECLINED').map(q=>q.text).join('; ')]].map(([k,v])=>`<div class="kv-row"><span class="k">${k}</span><span class="v">${esc(v)}</span></div>`).join('')}</div>${c.rounds.length>1?`<span class="section-label" style="margin:0">COUNTER OFFER HISTORY</span><div class="kv-list"><div class="kv-row"><span class="k">Original price (list)</span><span class="v">${money(HOME.list)}</span></div>${c.rounds.map((x,i)=>`<div class="kv-row"><span class="k">${x.by==='BUYER'?'Buyer':'Seller'} ${x.n===1?'offer':'counter'}${i===c.rounds.length-1?' (current)':''}</span><span class="v">${money(x.t.price)}</span></div>`).join('')}</div>`:''}<div class="field-reaction good-to-know">${icon('circle-check')}<div><b>Final agreed price ${money(t.price)}</b> · est. close ${fmtShort(t.closing)}</div></div><p class="field-hint">Next you sign the ${r.form} with ACCEPTS marked. ${c.me.people[1].n.split(' ')[0]} signs from their email, and ${c.them.short} are notified once every signature is in.</p><div class="modal-foot"><button class="btn btn-outline" data-close="1">Cancel</button><button class="btn btn-primary" data-act="accept">Accept ${r.n===1?'Offer':'Counter'}</button></div>`, true);
+  if(V.dlg === 'decline'){ const d = V.dec; const steps = `<div class="modal-steps">${[1,2,3].map(i=>`<i class="${i<=d.step?'on':''}"></i>`).join('')}</div>`;
+    if(d.step === 1) return shell(`${steps}<div class="modal-head"><p class="h3">Are you sure you want to decline this ${c.noun}?</p><p class="p-sm text-muted">Once declined, this ${c.noun} will no longer be available for acceptance.</p></div><div class="field-reaction error">${icon('circle-alert')}<div>Declining kills this ${c.noun}. They would have to start over from the beginning. Would you rather counter, or change something first?</div></div><div class="modal-foot"><button class="btn btn-outline" data-close="1">Go back</button><a class="btn btn-outline" href="03-counter.html?as=${c.s.counter}">Counter instead</a><button class="btn btn-danger" data-dec="2">Continue to decline</button></div>`);
+    if(d.step === 2) return shell(`${steps}<div class="modal-head"><p class="h3">Would you like to tell them why?</p><p class="p-sm text-muted">Optional. Providing a reason may help the other party better understand your decision.</p></div><div class="field"><label for="decReason">Select a reason <span class="field-optional">(Optional)</span></label><select id="decReason"><option value="">Select a reason</option>${['Price','Closing Date','Financing Terms','Contingencies','Seller Concessions','Inspection Terms','Included/Excluded Items','Other Terms','Prefer Not to Say'].map(o=>`<option ${d.reason===o?'selected':''}>${o}</option>`).join('')}</select></div><div class="field"><label for="decComment">Add a comment <span class="field-optional">(Optional)</span></label><textarea id="decComment" maxlength="500">${esc(d.comment)}</textarea></div><label class="checkbox-row prefill-box ${d.share?'confirmed':''}" style="flex-direction:row"><input type="checkbox" id="decShare" ${d.share?'checked':''}>Share this reason with them. Leave it unticked and your reason stays private; DIY Residential still records it.</label><div class="modal-foot"><button class="btn btn-outline" data-dec="1">Back</button><button class="btn btn-danger" data-dec="3">Continue</button></div>`);
+    return shell(`${steps}<div class="modal-head"><p class="h3">Decline this ${c.noun}?</p></div><div class="kv-list"><div class="kv-row"><span class="k">${r.n===1?'Offer':'Counter'} from</span><span class="v">${c.them.names}</span></div><div class="kv-row"><span class="k">Price</span><span class="v">${money(t.price)}</span></div><div class="kv-row"><span class="k">Your reason</span><span class="v">${d.reason?esc(d.reason):'None given'}</span></div><div class="kv-row"><span class="k">They will see</span><span class="v">${d.share&&d.reason?'Your reason'+(d.comment?' and comment':''):'Only that it was not accepted'}</span></div></div><p class="field-hint">Next you sign the ${r.form} with REJECTS marked. ${c.me.people[1].n.split(' ')[0]} signs too.</p><div class="modal-foot"><button class="btn btn-outline" data-dec="2">Back</button><button class="btn btn-danger-solid btn" data-act="decline">Decline ${r.n===1?'offer':'counteroffer'}</button></div>`); }
+  if(V.dlg === 'time') return shell(`<div class="modal-head"><p class="h3">Ask ${c.them.short} for more time</p><p class="p-sm text-muted">You all sign. The ${c.noun} stays alive until the new deadline.</p></div><div class="kv-list"><div class="kv-row"><span class="k">Current deadline</span><span class="v">${fmtDT(r.expires)}</span></div></div><div class="field-grid dense"><div class="field"><label for="extDate">Extend until</label><select id="extDate"><option value="" disabled ${V.ext.date?'':'selected'}>Select a date</option>${['September 25, 2026','September 26, 2026','September 29, 2026'].map(o=>`<option ${V.ext.date===o?'selected':''}>${o}</option>`).join('')}</select></div><div class="field"><label for="extTime">Time (CT)</label><select id="extTime"><option value="" disabled ${V.ext.time?'':'selected'}>Select a time</option>${['12:00 PM','5:00 PM','8:00 PM'].map(o=>`<option ${V.ext.time===o?'selected':''}>${o}</option>`).join('')}</select></div></div><div class="inset p-sm text-alt">Buyer and Seller mutually agree to extend the ${c.viewer==='SELLER'?"Seller's":"Buyer's"} deadline to respond to the ${r.n===1?'Offer':'Counter Offer'} until <b style="color:var(--foreground)">${V.ext.date&&V.ext.time?V.ext.date+' at '+V.ext.time:'[date and time]'}</b>. The ${r.n===1?'Offer':'Counter Offer'} shall remain in full force and effect through the extended response deadline, with no termination, expiration, or lapse occurring as a result of this extension. Except as expressly modified herein, all other terms and conditions remain unchanged and in full force and effect.</div><span class="section-label" style="margin:0">SIGNATURES REQUIRED</span><div>${[...c.me.people, ...c.them.people].map((p,i)=>`<div class="signer"><div><b>${p.n}</b><span>${p.r}</span></div><span class="badge ${i?'badge-muted':'badge-secondary'}">${['1st','2nd','3rd','4th'][i]}</span></div>`).join('')}</div><p class="field-hint">If ${c.them.short} don't sign before the current deadline, it still applies.</p><div class="modal-foot"><button class="btn btn-outline" data-close="1">Cancel</button><button class="btn btn-primary" data-act="extSend" ${V.ext.date&&V.ext.time?'':'disabled'}>Sign &amp; send request</button></div>`, true);
+  if(V.dlg === 'withdraw') return shell(`<div class="modal-head"><p class="h3">Withdraw your offer?</p><p class="p-sm text-muted">The seller can no longer accept it. Your agreement is voided at DocuSign and your $49 fee is refunded. To try again you would make a new offer.</p></div><div class="modal-foot"><button class="btn btn-outline" data-close="1">Keep my offer</button><button class="btn btn-danger" data-act="withdraw">Withdraw offer</button></div>`);
+  return '';
+}
+
+document.addEventListener('click', e => {
+  const t = e.target.closest('[data-scen],[data-state],[data-entry],[data-act],[data-dlg],[data-close],[data-dec],[data-base],[data-scroll],[data-toast],[data-tab],[data-neg]'); if(!t) return;
+  if(t.dataset.neg){ V.negView = t.dataset.neg; render(); return; }
+  if(t.dataset.tab){ V.tab = t.dataset.tab; if(t.dataset.openNet) V.netOpen = true; render(); const el = document.getElementById('tabs'); if(el && t.closest('#decision, .rc')) el.scrollIntoView({behavior:'smooth', block:'start'}); return; }
+  if(t.dataset.close && t.classList.contains('modal-scrim') && e.target !== t) return;
+  if(t.dataset.scen){ V.scen = t.dataset.scen; V.tab='summary'; V.phase=''; V.viewerOverride=null; V.dlg=null; V.ack=false; V.netOpen=false; V.payoffEdit=false; history.replaceState(null,'','?as='+V.scen); render(); window.scrollTo({top:0}); return; }
+  if(t.dataset.state){ V.state = t.dataset.state; V.phase=''; V.viewerOverride=null; render(); return; }
+  if(t.dataset.entry){ V.entry = t.dataset.entry; render(); window.scrollTo({top:0}); return; }
+  if(t.dataset.dlg){ V.dlg = t.dataset.dlg; if(V.dlg==='decline') V.dec = { step:1, reason:'', comment:'', share:false }; if(V.dlg==='time') V.ext = { date:'', time:'' }; render(); return; }
+  if(t.dataset.close){ V.dlg = null; render(); return; }
+  if(t.dataset.dec){ V.dec.step = Number(t.dataset.dec); render(); return; }
+  if(t.dataset.base){ V.cmpBase = t.dataset.base; render(); return; }
+  if(t.dataset.scroll){ e.preventDefault(); const el = document.getElementById(t.dataset.scroll); if(el) el.scrollIntoView({behavior:'smooth', block:'start'}); return; }
+  if(t.dataset.toast){ toast(t.dataset.toast); return; }
+  const a = t.dataset.act;
+  if(a==='net'){ V.netOpen = !V.netOpen; render(); }
+  else if(a==='payoff'){ V.payoffEdit = !V.payoffEdit; render(); }
+  else if(a==='savePayoff'){ V.payoff = num($('#payoffIn').value); V.liens = $('#liensIn').value; V.payoffEdit = false; toast('Estimates saved'); render(); }
+  else if(a==='table'){ V.showTable = !V.showTable; render(); }
+  else if(a==='accept'){ V.dlg = null; V.phase = 'accept-sign'; render(); window.scrollTo({top:0, behavior:'smooth'}); }
+  else if(a==='signAccept'){ V.phase = 'accept-cosign'; toast('Signed in DocuSign'); render(); }
+  else if(a==='cosigned'){ V.phase = 'accepted'; render(); }
+  else if(a==='toAck'){ const r = ctx().cur; V.viewerOverride = r.by; V.phase = 'ack'; render(); window.scrollTo({top:0}); }
+  else if(a==='ackDone'){ V.phase = 'bound'; render(); window.scrollTo({top:0}); }
+  else if(a==='decline'){ V.dlg = null; V.phase = 'decline-sign'; render(); window.scrollTo({top:0, behavior:'smooth'}); }
+  else if(a==='signDecline'){ V.phase = 'declined'; toast('Signed'); render(); }
+  else if(a==='cancelPhase'){ V.phase = ''; render(); }
+  else if(a==='extSend'){ V.dlg = null; toast(`Request sent. ${ctx().them.short} have until the current deadline to sign.`); render(); }
+  else if(a==='withdraw'){ V.dlg = null; V.phase = 'withdrawn'; render(); }
+});
+document.addEventListener('change', e => {
+  const id = e.target.id;
+  if(id==='ackBox'){ V.ack = e.target.checked; render(); }
+  else if(id==='decReason'){ V.dec.reason = e.target.value; }
+  else if(id==='decShare'){ V.dec.share = e.target.checked; render(); }
+  else if(id==='extDate'){ V.ext.date = e.target.value; render(); }
+  else if(id==='extTime'){ V.ext.time = e.target.value; render(); }
+});
+document.addEventListener('input', e => { if(e.target.id==='decComment') V.dec.comment = e.target.value; });
+document.addEventListener('keydown', e => { if(e.key==='Escape' && V.dlg){ V.dlg = null; render(); } });
+document.addEventListener('mouseover', e => { const g = e.target.closest('.pc-hit'); const tip = document.getElementById('pcTip'); if(!tip) return; if(!g){ tip.hidden = true; return; } const wrap = tip.parentElement.getBoundingClientRect(), r = g.getBoundingClientRect(); tip.textContent = g.dataset.tip; tip.hidden = false; tip.style.left = (r.left - wrap.left + r.width/2) + 'px'; tip.style.top = (r.top - wrap.top - 8) + 'px'; });
+render();
+</script>
+</body>
+</html>
